@@ -240,7 +240,10 @@ def _parse_config_location(value: Any, field_name: str) -> ConfigLocation:
 
 
 def _resolve_trusted_root(value: Path | str, *, project_root: Path) -> Path:
-    path = Path(value).expanduser()
+    # os.path.expanduser is used (not Path.expanduser) so that the HOME
+    # environment variable is honored on Windows, where Path.expanduser
+    # only consults USERPROFILE / HOMEDRIVE / HOMEPATH.
+    path = Path(os.path.expanduser(os.fspath(value)))
     if not path.is_absolute():
         path = project_root / path
     return path.resolve(strict=False)
