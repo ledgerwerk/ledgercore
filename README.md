@@ -251,20 +251,24 @@ not authorize filesystem access. It supports `"basic"`, `"wide"`, and
 
 ## Ledger project layout
 
-Phase-2 Ledger-family projects use `.ledger/ledger.toml` as the canonical
-shared manifest and `.ledger/ledger.local.toml` for machine-local overrides.
-`ledgercore` parses mappings only: downstream tools remain responsible for TOML
-loading, migration workflows, and any CLI behavior.
+`ledgercore` 0.3.0 introduces a canonical Ledger-family project layout
+centered on `.ledger/ledger.toml`. Projects that follow this layout share one
+canonical manifest, one normalized project UUID, and a fixed repository,
+workspace, and cache topology. `ledgercore` parses mappings only: downstream
+tools remain responsible for TOML loading, migration workflows, and any CLI
+behavior. The 0.3.0 release supports project-local tool config only; private
+sibling providers and external workspace configuration are reserved for a
+later phase and are not part of the 0.3.0 compatibility surface.
 
 ```python
 from pathlib import Path
 
 from ledgercore import (
-    PlatformRoots,
     locate_ledger_project,
     parse_ledger_project_manifest,
     resolve_ledger_layout,
 )
+from ledgercore.layout import PlatformRoots
 
 locator = locate_ledger_project(Path.cwd())
 if locator is not None and not locator.is_legacy:
@@ -299,6 +303,11 @@ if locator is not None and not locator.is_legacy:
 Repository mounts resolve beneath `.ledger/`; workspace and cache mounts resolve
 under `projects/<project-uuid>/project` or
 `projects/<project-uuid>/checkouts/<checkout-id>` depending on scope.
+
+Migration to the canonical layout is downstream-owned and explicit. Each
+Ledger-family tool decides its own migration policy, the canonical UUID it
+will adopt, and how it handles legacy data. `ledgercore` 0.3.0 ships
+discovery and resolution only and performs no automatic migration.
 
 ## Shared ledger config convention
 
@@ -412,7 +421,7 @@ python -m sphinx -W -b html docs docs/_build/html
 Versions are derived from VCS tags; there is no static version in
 `pyproject.toml` to update.
 
-1. Update `CHANGELOG.md` and create or sign the target tag, such as `v0.2.0`.
+1. Update `CHANGELOG.md` and create or sign the target tag, such as `v0.3.0`.
 2. Run the test, coverage, lint, formatting, typing, example, and docs gates in
    [`docs/release.md`](docs/release.md).
 3. Run `python -m build` and `python -m twine check dist/*`.
@@ -422,20 +431,16 @@ Versions are derived from VCS tags; there is no static version in
 For a supported non-git source archive, provide the intended version:
 
 ```bash
-SETUPTOOLS_SCM_PRETEND_VERSION=0.2.0 python -m build
+SETUPTOOLS_SCM_PRETEND_VERSION=X.Y.Z python -m build
 ```
 
 ## Stability
 
-`ledgercore` is pre-1.0. Public APIs are intended to be stable within the
-0.2.x series, but breaking changes may still happen before 1.0.0 when needed
-to keep the core API small and consistent.
-
-- No CLI is included.
-- No global configuration format is imposed.
-- No ledger schema is imposed.
-- No product-specific IDs are baked in.
-- All paths and refs are strings/paths chosen by downstream packages.
+`ledgercore` is pre-1.0. Patch releases preserve the current minor API where
+practical. Minor releases may intentionally evolve public APIs before 1.0,
+with changelog and migration guidance. The 0.3.0 release is the pilot API for
+the canonical Ledger-family layout; downstream tools that adopt the 0.3.x
+series should pin `ledgercore>=0.3.0,<0.4.0` during the pilot window.
 
 ## License
 

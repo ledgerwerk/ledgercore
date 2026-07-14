@@ -688,11 +688,27 @@ def resolve_ledger_layout(
     if registration is None:
         raise LedgerLayoutError(f"unknown ledger registration: {ledger_name}")
 
+    # LAY-002: reject workspace tool config in 0.3.0. The parser already rejects
+    # it through the supported mapping path; the resolver repeats the gate so
+    # manually constructed manifests cannot bypass it.
+    if registration.config is not None and registration.config.location == "workspace":
+        raise LedgerLayoutError(
+            "workspace tool config is not supported until the private-provider phase"
+        )
+
     env = os.environ if environ is None else environ
     roots = platform_roots or _default_platform_roots(manifest)
     project_root = locator.project_root.resolve(strict=False)
     config_root = locator.config_root.resolve(strict=False)
 
+    workspace_needed = any(
+        mount.storage == "workspace" for mount in registration.mounts.values()
+    ) or (
+        registration.config is not None and registration.config.location == "workspace"
+    )
+    cache_needed = any(
+        mount.storage == "cache" for mount in registration.mounts.values()
+    )
     checkout_needed = any(
         mount.scope == "checkout"
         for mount in registration.mounts.values()
@@ -712,24 +728,33 @@ def resolve_ledger_layout(
         else None
     )
 
-    workspace_family_root, workspace_source = _selected_family_root(
-        "workspace",
-        manifest,
-        project_root=project_root,
-        local_config=local_config,
-        explicit_root=workspace_root,
-        environ=env,
-        platform_roots=roots,
-    )
-    cache_family_root, cache_source = _selected_family_root(
-        "cache",
-        manifest,
-        project_root=project_root,
-        local_config=local_config,
-        explicit_root=cache_root,
-        environ=env,
-        platform_roots=roots,
-    )
+    # LAY-001: only resolve the family roots that this registration actually
+    # needs. A repository-only ledger must not require any external storage
+    # config; a workspace-only ledger must not require a cache root.
+    workspace_family_root: Path | None = None
+    workspace_source: StorageResolutionSource | None = None
+    if workspace_needed:
+        workspace_family_root, workspace_source = _selected_family_root(
+            "workspace",
+            manifest,
+            project_root=project_root,
+            local_config=local_config,
+            explicit_root=workspace_root,
+            environ=env,
+            platform_roots=roots,
+        )
+    cache_family_root: Path | None = None
+    cache_source: StorageResolutionSource | None = None
+    if cache_needed:
+        cache_family_root, cache_source = _selected_family_root(
+            "cache",
+            manifest,
+            project_root=project_root,
+            local_config=local_config,
+            explicit_root=cache_root,
+            environ=env,
+            platform_roots=roots,
+        )
 
     resolved_mounts: dict[str, ResolvedMount] = {}
     for mount_name, mount in registration.mounts.items():
@@ -748,12 +773,16 @@ def resolve_ledger_layout(
                 raise LedgerLayoutError(
                     "checkout-scoped resolution requires a checkout ID"
                 )
-            family_root = (
-                workspace_family_root
-                if mount.storage == "workspace"
-                else cache_family_root
-            )
-            source = workspace_source if mount.storage == "workspace" else cache_source
+            if mount.storage == "workspace":
+                assert workspace_family_root is not None
+                assert workspace_source is not None
+                family_root = workspace_family_root
+                source = workspace_source
+            else:
+                assert cache_family_root is not None
+                assert cache_source is not None
+                family_root = cache_family_root
+                source = cache_source
             scoped_root = _scoped_root(
                 family_root,
                 manifest.project_uuid,
@@ -787,6 +816,7 @@ def resolve_ledger_layout(
             config_scope = registration.config.scope or "project"
             if config_scope == "checkout" and selected_checkout_id is None:
                 raise LedgerLayoutError("checkout-scoped config requires a checkout ID")
+            assert workspace_family_root is not None
             scoped_root = _scoped_root(
                 workspace_family_root,
                 manifest.project_uuid,

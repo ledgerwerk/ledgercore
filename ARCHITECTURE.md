@@ -1,7 +1,7 @@
 ---
 title: "Architecture Documentation"
-date: "2026-06-13"
-generator: "archledger 0.3.1.dev6+g5c58990ed"
+version: 1
+generator: "archledger 0.3.2.dev1+g505ad5c4c"
 arc42_template_version: "9.0-EN"
 ---
 
@@ -53,12 +53,20 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Remote storage, synchronization, indexing, querying, or database abstraction
 - TOML file parsing, migration orchestration, or a Ledger-family CLI
 - CLI error rendering or exit-code policy
+- Private sibling storage providers, external workspace configuration, and the `platformdirs` `project-relative` provider. These are reserved for a later release phase.
+- Automated layout migration. Migration to the canonical layout is downstream-owned and explicit.
 
 ## Requirements Overview
 
+<!-- archledger: no accepted records for this section yet -->
+
 ## Quality Goals
 
+<!-- archledger: no accepted records for this section yet -->
+
 ## Stakeholders
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Architecture Constraints
 
@@ -74,11 +82,12 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 
 ## Product constraints
 
-- The package is pre-1.0 (`0.2.0`), with an intent to keep the 0.2.x public API stable where practical.
-- The top-level package re-exports a curated convenience API, including `__version__`.
-- The phase-2 layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
+- The package is pre-1.0 (`0.3.0`); patch releases preserve the current minor API where practical, and minor releases may intentionally evolve public APIs before 1.0 with changelog and migration guidance. The 0.3.0 release is the pilot API for the canonical Ledger-family layout.
+- The top-level package re-exports a curated convenience API, including `__version__`. The curated root layout facade exposes `LedgerProjectLocator`, `ResolvedLedgerLayout`, `locate_ledger_project`, `parse_ledger_project_manifest`, `parse_ledger_local_config`, `resolve_ledger_layout`, and `derive_checkout_id`; detailed layout dataclasses remain under `ledgercore.layout`.
+- The canonical layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
 - Existing compatibility aliases and documented legacy reference syntax are retained.
 - Persisted formats must stay inspectable with ordinary text tools.
+- The private sibling provider phase and the external workspace configuration phase are explicitly out of scope for 0.3.0. `ledgercore` accepts provider values in the local override for migration diagnostics but rejects them in the resolver until that phase lands.
 
 ## Engineering constraints
 
@@ -93,6 +102,8 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - `fsync` improves crash durability but cannot guarantee every device or filesystem.
 - Path confinement observes symlink resolution at validation time; downstream code must account for time-of-check/time-of-use races in hostile writable trees.
 - Layout discovery and resolution must not create directories, config files, caches, or markers.
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Context and Scope
 
@@ -149,11 +160,15 @@ The downstream application owns all persisted data. `ledgercore` keeps no catalo
 
 ## Business Context
 
+<!-- archledger: no accepted records for this section yet -->
+
 ## Technical Context
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Solution Strategy
 
-The architecture remains a stateless utility library organized by technical concern. Phase 2 adds a dedicated project-layout layer that standardizes shared Ledger-family topology without introducing services, migration flows, or process-global state.
+The architecture remains a stateless utility library organized by technical concern. The 0.3.0 canonical layout layer standardizes shared Ledger-family topology without introducing services, migration flows, or process-global state.
 
 1. **Filesystem safety by explicit primitives.** Atomic replacement writes a temporary sibling, optionally flushes it, calls `os.replace`, and optionally flushes the parent. Create-only writes use `O_CREAT | O_EXCL`.
 2. **Validation at format boundaries.** JSON/YAML loaders require the expected root shape; front matter requires a mapping; IDs, refs, and paths are parsed before use.
@@ -174,6 +189,8 @@ The architecture remains a stateless utility library organized by technical conc
 - The package root provides discoverability; direct module imports permit narrow dependencies.
 
 ## Strategy Items
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Building Block View
 
@@ -212,6 +229,8 @@ ledgercore
 - No module owns mutable singleton state.
 
 Names exported from modules and the curated package `__all__` are intended API. Underscore-prefixed helpers are internal. Front matter compatibility aliases are public legacy surfaces.
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Runtime View
 
@@ -268,6 +287,8 @@ The parser tries canonical, legacy underscore, file-safe, and local forms in ord
 
 Valid object rows are retained in order. Invalid JSON and non-object rows become line-numbered issues. File-level read failures raise a store exception.
 
+<!-- archledger: no accepted records for this section yet -->
+
 # Deployment View
 
 ```text
@@ -275,6 +296,7 @@ Python 3.10+ process
 ├── downstream ledger application
 ├── ledgercore package
 ├── PyYAML package
+└── platformdirs package
 └── operating-system filesystem APIs
     └── application-selected local data directories
 ```
@@ -286,7 +308,7 @@ The package is installed into the same environment as its consumer. It opens onl
 - Build backend: Hatchling
 - Artifacts: Python wheel and source distribution
 - Package data: `py.typed`
-- Runtime dependency: PyYAML
+- Runtime dependencies: PyYAML and platformdirs
 - Development dependencies: pytest, Ruff, mypy, and PyYAML stubs
 - Release tools: build and Twine
 
@@ -301,6 +323,8 @@ Project metadata declares Python 3.10 through 3.13. The code is primarily OS-neu
 - Config discovery walks upward; source iteration returns a fully materialized sorted list.
 
 The deployment model fits repository-scale ledgers, not large datasets or high-throughput storage services.
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Cross-cutting Concepts
 
@@ -342,6 +366,8 @@ Numbers are positive and normally padded to four digits. Formatting, parsing, an
 
 Compatibility uses permissive input and canonical output. Public additions should be exported, documented, typed, and tested. Pytest covers behavior; Ruff and strict mypy cover style and typing.
 
+<!-- archledger: no accepted records for this section yet -->
+
 # Architecture Decisions
 
 | Decision                                     | Status   | Consequence                                                                             |
@@ -362,6 +388,8 @@ Compatibility uses permissive input and canonical output. Public additions shoul
 | Curated package facade                       | Accepted | Convenient imports require deliberate `__all__` maintenance                             |
 
 Decision drivers are source-control friendliness, a small reviewed dependency surface, clear downstream ownership, deterministic behavior, and prevention of common filesystem corruption and traversal mistakes. The implementation does not claim database-grade transactions or security in an adversarial filesystem.
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Quality Requirements
 
@@ -390,7 +418,11 @@ Most functions are pure transformations or accept explicit paths and policies. T
 
 ## Quality Requirements Overview
 
+<!-- archledger: no accepted records for this section yet -->
+
 ## Quality Scenarios
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Risks and Technical Debt
 
@@ -411,6 +443,8 @@ Most functions are pure transformations or accept explicit paths and policies. T
 Lack of multi-file transactions, indexing, remote access, and domain validation is an intentional boundary, not an incomplete feature list.
 
 ## Risk Overview
+
+<!-- archledger: no accepted records for this section yet -->
 
 # Glossary
 
@@ -435,3 +469,5 @@ Lack of multi-file transactions, indexing, remote access, and domain validation 
 | Source-first documentation | Canonical architecture fragments from which builds are derived           |
 | Store error                | Package error for malformed structured data or file I/O                  |
 | Whole-file processing      | Reading or constructing a complete artifact in memory                    |
+
+<!-- archledger: no accepted records for this section yet -->

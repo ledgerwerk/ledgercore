@@ -191,34 +191,63 @@ Safe relative POSIX path validation, config discovery, config-relative resolutio
 | `resolve_config_relative_path(config_path, value, *, field_name)`                       | Resolve a relative path relative to the config file's directory.    |
 
 (ledgercorelayout)=
+TK:
 
 ## `ledgercore.layout`
 
-Typed Ledger-family project layout parsing and resolution. The public parser
-APIs accept mappings rather than TOML file paths.
+TK:
+PM:Typed Ledger-family project layout parsing and resolution. The public parser
+WB:APIs accept mappings rather than TOML file paths.
+JR:
+**Package-root facade.** The following layout symbols are re-exported from the
+top-level `ledgercore` package for convenience and form the supported public
+layout facade. Detailed layout dataclasses are intentionally kept under
+`ledgercore.layout` and must not be imported from the package root.
 
-| Symbol                                                          | Description                                                                                                               |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `StorageClass`                                                  | Literal type: `"repository"`, `"workspace"`, or `"cache"`.                                                                |
-| `StorageScope`                                                  | Literal type: `"project"` or `"checkout"`.                                                                                |
-| `ConfigLocation`                                                | Literal type: `"project"` or `"workspace"`.                                                                               |
-| `ProviderKind`                                                  | Literal type reserved for built-in and future provider kinds.                                                             |
-| `StorageResolutionSource`                                       | Literal type: `"repository"`, `"explicit"`, `"environment"`, `"local-root"`, `"local-provider"`, or `"manifest-default"`. |
-| `PlatformRoots`                                                 | Frozen dataclass with `user_data` and `user_cache` family-root paths.                                                     |
-| `StorageProviderDefinition`                                     | Frozen dataclass reserved for named provider definitions.                                                                 |
-| `LedgerMount`                                                   | Frozen dataclass describing one named mount.                                                                              |
-| `ToolConfigDefinition`                                          | Frozen dataclass describing one ledger config location.                                                                   |
-| `LedgerRegistration`                                            | Frozen dataclass with one ledger name, config definition, and named mounts.                                               |
-| `LedgerProjectManifest`                                         | Frozen dataclass describing the parsed schema-version-2 project manifest.                                                 |
-| `LedgerLocalConfig`                                             | Frozen dataclass for optional machine-local overrides.                                                                    |
-| `ResolvedMount`                                                 | Frozen dataclass with resolved mount path, scoped root, and source.                                                       |
-| `ResolvedLedgerLayout`                                          | Frozen dataclass with resolved project, config, optional tool config, checkout ID, and named mounts.                      |
-| `parse_ledger_project_manifest(document)`                       | Strictly parse a schema-version-2 project manifest mapping.                                                               |
-| `parse_ledger_local_config(document, *, project_root)`          | Parse the optional schema-version-1 local override mapping.                                                               |
-| `derive_checkout_id(project_root)`                              | Derive a deterministic checkout ID from the normalized project path.                                                      |
-| `resolve_ledger_layout(locator, manifest, ledger_name, *, ...)` | Resolve repository, workspace, cache, and tool-config paths for one registered ledger.                                    |
+| Symbol                               | Description                                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `LedgerProjectLocator`               | Frozen dataclass with `project_root`, `config_root`, `manifest_path`, `local_config_path`, and `source`.     |
+| `ResolvedLedgerLayout`               | Frozen dataclass with resolved project, config, optional tool config, checkout ID, and named mounts.         |
+| `locate_ledger_project(start, ...)`  | Locate a canonical `.ledger/ledger.toml` project manifest or a legacy fallback.                              |
+| `parse_ledger_project_manifest(...)` | Strictly parse a schema-version-2 project manifest mapping.                                                  |
+| `parse_ledger_local_config(...)`     | Parse the optional schema-version-1 local override mapping.                                                  |
+| `resolve_ledger_layout(...)`         | Resolve repository, workspace, cache, and tool-config paths for one registered ledger.                       |
+| `derive_checkout_id(project_root)`   | Derive a deterministic checkout ID from the normalized project path. Retained at the root for 0.2.x callers. |
 
-(ledgercorepath-text)=
+**Detailed layout surface.** The symbols below are public from `ledgercore.layout`
+but are intentionally NOT re-exported from the package root. Use the explicit
+module import to keep the curated facade small.
+
+| Symbol                  | Description                                                                 |
+| ----------------------- | --------------------------------------------------------------------------- |
+| `StorageClass`          | Literal type: `"repository"`, `"workspace"`, or `"cache"`.                  |
+| `StorageScope`          | Literal type: `"project"` or `"checkout"`.                                  |
+| `ConfigLocation`        | Literal type: `"project"` or `"workspace"`.                                 |
+| `PlatformRoots`         | Frozen dataclass with `user_data` and `user_cache` family-root paths.       |
+| `LedgerMount`           | Frozen dataclass describing one named mount.                                |
+| `ToolConfigDefinition`  | Frozen dataclass describing one ledger config location.                     |
+| `LedgerRegistration`    | Frozen dataclass with one ledger name, config definition, and named mounts. |
+| `LedgerProjectManifest` | Frozen dataclass describing the parsed schema-version-2 project manifest.   |
+| `LedgerLocalConfig`     | Frozen dataclass for optional machine-local overrides.                      |
+| `ResolvedMount`         | Frozen dataclass with resolved mount path, scoped root, and source.         |
+
+**Reserved for a later phase.** The following symbols exist for forward
+compatibility and migration diagnostics. They are not part of the 0.3.0
+compatibility surface and must not be relied on by downstream tools yet.
+
+| Symbol                      | Status                                                                                              |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| `ProviderKind`              | Reserved literal type for built-in and future provider kinds. Stable in 0.3.0 but unused.           |
+| `StorageProviderDefinition` | Reserved frozen dataclass for named provider definitions. Stable in 0.3.0 but unused.               |
+| `StorageResolutionSource`   | The `"local-provider"` value is reserved for the private-provider phase and never emitted in 0.3.0. |
+
+**Supported construction flow.** `parse_ledger_project_manifest` and
+`parse_ledger_local_config` are the only supported ways to construct manifest
+and local-config objects. Manually built `LedgerProjectManifest` instances that
+bypass the parser (for example, with a workspace tool config) are not a
+supported input to `resolve_ledger_layout` in 0.3.0; the resolver rejects them.
+This is a deliberate gate until the private-provider phase lands.
+SM:
 
 ## `ledgercore.path_text`
 

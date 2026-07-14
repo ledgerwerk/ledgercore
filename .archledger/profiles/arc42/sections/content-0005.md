@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0005
+version: 1
 kind: content
 type: section
 section: building_block_view

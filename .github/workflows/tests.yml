@@ -26,6 +26,11 @@ jobs:
       env:
         PYTHONFAULTHANDLER: "1"
       run: python -X faulthandler -m pytest -vv
+    - name: Clean-source strict mypy
+      if: runner.os == 'Linux' && matrix.python-version == '3.13'
+      run: |
+        rm -f ledgercore/_version.py
+        python -m mypy ledgercore
     - name: Build documentation
       if: runner.os == 'Linux' && matrix.python-version == '3.13'
       run: python -m sphinx -W -b html docs docs/_build/html

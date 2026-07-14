@@ -6,7 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-06-17
+## [0.3.0] - 2026-07-14
+
+### Added
+
+- Canonical `.ledger/ledger.toml` discovery through `LedgerProjectLocator`, with
+  legacy `.ledger.toml`, `ledger.toml`, and caller-provided legacy tool config
+  discovery retained as a compatibility surface.
+- Schema-version-2 project manifest parsing through `parse_ledger_project_manifest`,
+  with strict top-level and nested field validation, a required normalized project
+  UUID, multiple named mounts, repository / workspace / cache storage classes, and
+  project / checkout scope handling.
+- Optional machine-local layout config parsing through `parse_ledger_local_config`,
+  including `workspace_root`, `cache_root`, `workspace_provider`, `cache_provider`,
+  and `checkout_id` fields.
+- Read-only layout resolution through `resolve_ledger_layout`, with named
+  repository, workspace, and cache mounts, fixed `projects/<uuid>/project` and
+  `projects/<uuid>/checkouts/<checkout-id>` structural roots, explicit,
+  environment, local-root, and platform-root precedence, and a deterministic
+  checkout-ID derivation exposed as `derive_checkout_id`.
+- `platformdirs`-backed family roots for the default workspace and cache providers.
+- Immutable `ResolvedLedgerLayout` and `ResolvedMount` objects.
+- `LedgerLayoutError` for invalid or unresolvable Ledger-family layouts.
+- `ledgercore/_version.pyi` stub so strict mypy passes in a pristine source tree.
+
+### Compatibility
+
+- Legacy `.ledger.toml`, `ledger.toml`, and caller-provided legacy tool config
+  discovery remain available as compatibility surfaces; legacy locators report
+  `is_legacy=True` and are accepted by discovery but rejected by
+  `resolve_ledger_layout`.
+- Legacy locators are discovery and migration inputs only. They cannot be passed
+  to canonical layout resolution.
+- `derive_checkout_id` remains importable from the package root for 0.2.x callers
+  while also being available under `ledgercore.layout`.
+- No automatic migration is performed. Migration to the canonical layout is
+  downstream-owned and explicit.
+
+### Explicit exclusions
+
+- No private sibling provider support (`workspace_provider` or `cache_provider`
+  set to a non-default value is accepted by the parser for migration diagnostics
+  but rejected by the resolver).
+- No external workspace config support (`config.location == "workspace"` is
+  rejected until the private-provider phase).
+- No TOML parser, no CLI, and no manifest writer.
+- No downstream migration implementation; this release is a core API only.
 
 ### Added
 
@@ -27,7 +72,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - SHA-256 content fingerprinting with front matter decomposition for document and metadata hashing
 - Path text normalization for Unicode escapes, punctuation, and filesystem-safe slug generation
 - FrontMatterRenderOptions with key ordering, remaining key sort control, scalar styling, and template placeholder modes
-- interval_to_compact_duration and parse_compact_duration for human-readable time interval formatting
 
 ### Changed
 

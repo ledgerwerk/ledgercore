@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0010
+version: 1
 kind: content
 type: section
 section: quality_requirements

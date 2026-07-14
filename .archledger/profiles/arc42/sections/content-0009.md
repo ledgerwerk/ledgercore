@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0009
+version: 1
 kind: content
 type: section
 section: architecture_decisions

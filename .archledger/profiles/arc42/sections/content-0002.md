@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0002
+version: 1
 kind: content
 type: section
 section: architecture_constraints
@@ -28,11 +29,12 @@ source_refs:
 
 ## Product constraints
 
-- The package is pre-1.0 (`0.2.0`), with an intent to keep the 0.2.x public API stable where practical.
-- The top-level package re-exports a curated convenience API, including `__version__`.
-- The phase-2 layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
+- The package is pre-1.0 (`0.3.0`); patch releases preserve the current minor API where practical, and minor releases may intentionally evolve public APIs before 1.0 with changelog and migration guidance. The 0.3.0 release is the pilot API for the canonical Ledger-family layout.
+- The top-level package re-exports a curated convenience API, including `__version__`. The curated root layout facade exposes `LedgerProjectLocator`, `ResolvedLedgerLayout`, `locate_ledger_project`, `parse_ledger_project_manifest`, `parse_ledger_local_config`, `resolve_ledger_layout`, and `derive_checkout_id`; detailed layout dataclasses remain under `ledgercore.layout`.
+- The canonical layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
 - Existing compatibility aliases and documented legacy reference syntax are retained.
 - Persisted formats must stay inspectable with ordinary text tools.
+- The private sibling provider phase and the external workspace configuration phase are explicitly out of scope for 0.3.0. `ledgercore` accepts provider values in the local override for migration diagnostics but rejects them in the resolver until that phase lands.
 
 ## Engineering constraints
 

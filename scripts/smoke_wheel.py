@@ -22,7 +22,6 @@ import tempfile
 from pathlib import Path
 
 from ledgercore import (
-    PlatformRoots,
     __version__,
     locate_ledger_project,
     parse_ledger_project_manifest,
@@ -32,6 +31,7 @@ from ledgercore.errors import IdFormatError
 from ledgercore.frontmatter import render_front_matter_text, split_front_matter_text
 from ledgercore.ids import LedgerIdFormat
 from ledgercore.jsonl import load_jsonl_object_map, write_jsonl_objects
+from ledgercore.layout import PlatformRoots
 from ledgercore.refs import parse_resource_ref
 from ledgercore.time import utc_now_iso
 

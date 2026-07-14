@@ -1,7 +1,9 @@
 # Release process
 
 This document describes how to build, validate, and publish a `ledgercore`
-release.
+release. The release gate is the clean-wheel smoke test in
+[`scripts/smoke_wheel.py`](../scripts/smoke_wheel.py) executed against a
+wheel installed in a fresh virtualenv.
 
 ## Prerequisites
 
@@ -13,47 +15,52 @@ python -m pip install -e ".[dev,docs,release]"
 python -m pip install -e ".[dev]" && python -m pip install build twine
 ```
 
-`ledgercore` uses hatch-vcs for versioning. Installing or building the project
-generates a gitignored `ledgercore/_version.py` that exposes
-`ledgercore.__version__`; do not commit that file.
-Direct source-tree imports fall back to `0.0.0+unknown` when that generated
-module is absent.
+`ledgercore` uses `hatch-vcs` for versioning. Installing or building the
+project generates a gitignored `ledgercore/_version.py` that exposes
+`ledgercore.__version__`; do not commit that file. Direct source-tree imports
+fall back to `0.0.0+unknown` when that generated module is absent, and a
+matching `ledgercore/_version.pyi` ships with the package so strict mypy
+passes in a pristine source tree.
 
 ## Pre-release checklist
 
 1. Ensure all tests pass:
 
-```bash
-python -m pytest -q
-```
+   ```bash
+   python -m pytest -q
+   ```
 
 2. Ensure lint is clean:
 
-```bash
-python -m ruff check .
-```
+   ```bash
+   python -m ruff check .
+   ```
 
-3. Ensure type checking passes:
+3. Ensure type checking passes in a pristine source tree. The generated
+   `_version.py` is removed first so the documented source-tree fallback is
+   actually exercised:
 
-```bash
-python -m mypy ledgercore
-```
+   ```bash
+   rm -f ledgercore/_version.py
+   python -m mypy ledgercore
+   ```
 
-4. Ensure formatting and documentation are clean:
+4. Ensure formatting and documentation are clean. The Sphinx build no longer
+   requires network access; `sphinx.ext.intersphinx` is disabled because no
+   cross-project Python references are used yet.
 
-```bash
-python -m ruff format --check .
-python -m sphinx -W -b html docs docs/_build/html
-```
+   ```bash
+   python -m ruff format --check .
+   python -m sphinx -W -b html docs docs/_build/html
+   ```
 
-5. Ensure a `LICENSE` file is present and ships in the built artifacts:
+5. Ensure the three example scripts run from the source tree:
 
-```bash
-test -f LICENSE
-```
-
-6. Ensure examples run from the source tree with `PYTHONPATH=. python examples/*.py`
-   (or after installing the package).
+   ```bash
+   PYTHONPATH=. python examples/frontmatter.py
+   PYTHONPATH=. python examples/refs.py
+   PYTHONPATH=. python examples/storage.py
+   ```
 
 ## Building
 
@@ -61,11 +68,17 @@ test -f LICENSE
 python -m build
 ```
 
-Builds from a non-git source archive are supported when the intended version is
-provided explicitly:
+Builds from a non-git source archive are supported when the intended version
+is provided explicitly. Use a placeholder for repeatable local runs:
 
 ```bash
-SETUPTOOLS_SCM_PRETEND_VERSION=0.2.0 python -m build
+SETUPTOOLS_SCM_PRETEND_VERSION=X.Y.Z python -m build
+```
+
+For an actual 0.3.0 release build, use `0.3.0`:
+
+```bash
+SETUPTOOLS_SCM_PRETEND_VERSION=0.3.0 python -m build
 ```
 
 This produces `dist/ledgercore-<version>.tar.gz` and
@@ -79,57 +92,49 @@ python -m twine check dist/*
 
 ## Smoke testing (required release gate)
 
-Install the built wheel into a clean virtualenv and run the smoke test. Use a
-writable location for the venv (on some platforms `/tmp` is not writable):
+Install the built wheel into a clean virtualenv and run the release smoke
+script. The script exercises a representative slice of the public API so that
+packaging regressions (missing modules, lost data files, broken imports)
+surface before publishing. Use a writable location for the venv; on some
+platforms `/tmp` is not writable. Run the script from a working directory
+that does not shadow the installed package:
 
 ```bash
 smoke_dir="$(pwd)/.smoke"
 rm -rf "$smoke_dir"
 python -m venv "$smoke_dir"
 "$smoke_dir/bin/python" -m pip install "$(echo dist/*.whl)"
-"$smoke_dir/bin/python" - <<'PY'
-from pathlib import Path
-import tempfile
-from ledgercore import __version__
-from ledgercore.ids import LedgerIdFormat
-from ledgercore.refs import parse_resource_ref
-from ledgercore.frontmatter import render_front_matter_text, split_front_matter_text
-from ledgercore.jsonl import load_jsonl_object_map, write_jsonl_objects
-from ledgercore.time import utc_now_iso
-
-assert isinstance(__version__, str) and __version__
-assert LedgerIdFormat(prefix="task").format(1) == "task-0001"
-assert parse_resource_ref("tl:task-0001").global_ref == "tl:task-0001"
-text = render_front_matter_text({"id": "task-0001", "flag": "no"}, "# Body\n", scalar_style="minimal")
-meta, body = split_front_matter_text(text)
-assert meta["id"] == "task-0001" and meta["flag"] == "no" and body == "# Body\n"
-with tempfile.TemporaryDirectory() as d:
-    path = Path(d) / "rows.jsonl"
-    write_jsonl_objects(path, [{"id": "a", "v": 1}, {"id": "b", "v": 2}])
-    result = load_jsonl_object_map(path, key="id")
-    assert not result.issues and set(result.rows_by_key) == {"a", "b"}
-assert utc_now_iso().endswith("Z")
-print("ledgercore smoke test passed")
-PY
-rm -rf "$smoke_dir"
+"$smoke_dir/bin/python" scripts/smoke_wheel.py
 ```
 
-Also verify the built artifacts ship the `LICENSE` file and the generated
-`ledgercore/_version.py`:
+The script must print `ledgercore 0.3.0 smoke test passed` and exit 0. The
+source-tree smoke test (`tests/test_smoke_wheel_source.py`) covers the same
+`main()` function and must also pass in CI.
+
+## Artifact content verification
+
+Verify the wheel and sdist ship the `LICENSE` file, the `py.typed` marker,
+and the generated `ledgercore/_version.py`:
 
 ```bash
 python - <<'PY'
 import glob, tarfile, zipfile
+
 wheel = glob.glob("dist/*.whl")[0]
 sdist = glob.glob("dist/*.tar.gz")[0]
-with zipfile.ZipFile(wheel) as z:
-    names = z.namelist()
+
+with zipfile.ZipFile(wheel) as archive:
+    names = archive.namelist()
     assert any(name.endswith("LICENSE") for name in names)
     assert "ledgercore/_version.py" in names
-with tarfile.open(sdist) as t:
-    names = t.getnames()
+    assert "ledgercore/py.typed" in names
+
+with tarfile.open(sdist) as archive:
+    names = archive.getnames()
     assert any(name.endswith("/LICENSE") for name in names)
     assert any(name.endswith("/ledgercore/_version.py") for name in names)
+    assert any(name.endswith("/ledgercore/py.typed") for name in names)
+
 print("artifact check passed")
 PY
 ```
@@ -142,6 +147,8 @@ python -m twine upload dist/*
 
 ## Version policy
 
-`ledgercore` is pre-1.0. Public APIs are intended to be stable within the
-0.2.x series, but breaking changes may still happen before 1.0.0 when needed
-to keep the core API small and consistent.
+`ledgercore` is pre-1.0. Patch releases preserve the current minor API where
+practical. Minor releases may intentionally evolve public APIs before 1.0,
+with changelog and migration guidance. The 0.3.0 release is the pilot API
+for the canonical Ledger-family layout; downstream tools that adopt the
+0.3.x series should pin `ledgercore>=0.3.0,<0.4.0` during the pilot window.

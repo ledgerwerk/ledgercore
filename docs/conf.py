@@ -22,9 +22,6 @@ extensions = [
     "myst_parser",
     "sphinx.ext.autodoc",
     "sphinx.ext.coverage",
-    "sphinx.ext.intersphinx",
-    "sphinx.ext.napoleon",
-    "sphinx.ext.todo",
     "sphinx.ext.viewcode",
 ]
 
@@ -66,8 +63,8 @@ napoleon_use_ivar = False
 napoleon_use_param = True
 napoleon_use_rtype = True
 
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3/", None),
-}
-
+# intersphinx is intentionally not configured. The current documentation does
+# not contain cross-project Python references; re-enabling it requires both
+# real references and a release-process policy for offline or cached
+# inventories.
 todo_include_todos = True

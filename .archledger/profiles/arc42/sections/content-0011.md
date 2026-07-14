@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0011
+version: 1
 kind: content
 type: section
 section: risks_and_technical_debt

@@ -592,7 +592,7 @@ class TestResolveLedgerLayout:
             == (project_root / ".ledger" / "task" / "records").resolve()
         )
 
-    def test_tool_config_scope_is_independent(self, tmp_path: Path) -> None:
+    def test_rejects_workspace_tool_config_in_resolver(self, tmp_path: Path) -> None:
         project_root = tmp_path / "project"
         (project_root / ".ledger").mkdir(parents=True)
         locator = _canonical_locator(project_root)
@@ -629,41 +629,45 @@ class TestResolveLedgerLayout:
             ),
         )
 
-        layout = resolve_ledger_layout(
-            locator,
-            manifest,
-            "taskledger",
-            checkout_id="checkout-a",
-            platform_roots=PlatformRoots(
-                tmp_path / "platform-data", tmp_path / "platform-cache"
-            ),
-        )
+        with pytest.raises(
+            LedgerLayoutError, match="workspace tool config is not supported"
+        ):
+            resolve_ledger_layout(
+                locator,
+                manifest,
+                "taskledger",
+                checkout_id="checkout-a",
+                platform_roots=PlatformRoots(
+                    tmp_path / "platform-data", tmp_path / "platform-cache"
+                ),
+            )
 
-        assert (
-            layout.tool_config_path
-            == (
-                tmp_path
-                / "platform-data"
-                / "projects"
-                / manifest.project_uuid
-                / "project"
-                / "task"
-                / "config.toml"
-            ).resolve()
-        )
-        assert (
-            layout.mounts["data"].path
-            == (
-                tmp_path
-                / "platform-data"
-                / "projects"
-                / manifest.project_uuid
-                / "checkouts"
-                / "checkout-a"
-                / "task"
-                / "data"
-            ).resolve()
-        )
+    def test_resolver_rejects_workspace_tool_config_from_parsed_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        # The parser already rejects workspace tool config today; this guards
+        # the same gate from the supported mapping path.
+        with pytest.raises(
+            LedgerLayoutError,
+            match="not supported until the private-provider phase",
+        ):
+            parse_ledger_project_manifest(
+                {
+                    "schema_version": 2,
+                    "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+                    "ledgers": {
+                        "taskledger": {
+                            "config": {
+                                "location": "workspace",
+                                "path": "task/config.toml",
+                            },
+                            "mounts": {
+                                "data": {"storage": "workspace", "path": "task/data"},
+                            },
+                        }
+                    },
+                }
+            )
 
     def test_rejects_legacy_or_inconsistent_locators(self, tmp_path: Path) -> None:
         project_root = tmp_path / "project"
@@ -754,3 +758,122 @@ class TestResolveLedgerLayout:
             if layout.tool_config_path is not None
             else True
         )
+
+    # LAY-001 regression tests: family roots are resolved lazily so that
+    # repository-only ledgers are unaffected by irrelevant external settings
+    # and a workspace-only ledger does not require cache configuration.
+
+    def test_repository_only_unaffected_by_workspace_provider(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "project"
+        (project_root / ".ledger").mkdir(parents=True)
+        locator = _canonical_locator(project_root)
+        manifest = parse_ledger_project_manifest(
+            {
+                "schema_version": 2,
+                "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+                "ledgers": {
+                    "archledger": {
+                        "mounts": {
+                            "records": {
+                                "storage": "repository",
+                                "path": "arch/records",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+        local = LedgerLocalConfig(
+            schema_version=1,
+            workspace_root=None,
+            cache_root=None,
+            workspace_provider="private-sibling",
+            cache_provider="private-sibling",
+            checkout_id=None,
+        )
+
+        layout = resolve_ledger_layout(
+            locator,
+            manifest,
+            "archledger",
+            local_config=local,
+            platform_roots=PlatformRoots(tmp_path / "pd", tmp_path / "pc"),
+        )
+
+        assert "checkouts" not in layout.mounts["records"].path.parts
+        assert layout.mounts["records"].source == "repository"
+        assert (
+            layout.mounts["records"].path
+            == (project_root / ".ledger" / "arch" / "records").resolve()
+        )
+
+    def test_workspace_only_does_not_require_cache_configuration(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "project"
+        (project_root / ".ledger").mkdir(parents=True)
+        locator = _canonical_locator(project_root)
+        manifest = parse_ledger_project_manifest(
+            {
+                "schema_version": 2,
+                "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+                "ledgers": {
+                    "taskledger": {
+                        "mounts": {
+                            "data": {
+                                "storage": "workspace",
+                                "scope": "checkout",
+                                "path": "task/data",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+
+        layout = resolve_ledger_layout(
+            locator,
+            manifest,
+            "taskledger",
+            checkout_id="checkout-a",
+            platform_roots=PlatformRoots(tmp_path / "pd", tmp_path / "pc"),
+        )
+
+        assert "checkouts" in layout.mounts["data"].path.parts
+        assert layout.mounts["data"].source == "manifest-default"
+
+    def test_cache_only_does_not_require_workspace_configuration(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "project"
+        (project_root / ".ledger").mkdir(parents=True)
+        locator = _canonical_locator(project_root)
+        manifest = parse_ledger_project_manifest(
+            {
+                "schema_version": 2,
+                "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+                "ledgers": {
+                    "taskledger": {
+                        "mounts": {
+                            "indexes": {
+                                "storage": "cache",
+                                "scope": "project",
+                                "path": "task/indexes",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+
+        layout = resolve_ledger_layout(
+            locator,
+            manifest,
+            "taskledger",
+            platform_roots=PlatformRoots(tmp_path / "pd", tmp_path / "pc"),
+        )
+
+        assert layout.mounts["indexes"].source == "manifest-default"
+        assert "project" in layout.mounts["indexes"].path.parts

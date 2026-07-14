@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0004
+version: 1
 kind: content
 type: section
 section: solution_strategy
@@ -16,7 +17,7 @@ source_refs:
     reason: Core safety and composition strategy
 ---
 
-The architecture remains a stateless utility library organized by technical concern. Phase 2 adds a dedicated project-layout layer that standardizes shared Ledger-family topology without introducing services, migration flows, or process-global state.
+The architecture remains a stateless utility library organized by technical concern. The 0.3.0 canonical layout layer standardizes shared Ledger-family topology without introducing services, migration flows, or process-global state.
 
 1. **Filesystem safety by explicit primitives.** Atomic replacement writes a temporary sibling, optionally flushes it, calls `os.replace`, and optionally flushes the parent. Create-only writes use `O_CREAT | O_EXCL`.
 2. **Validation at format boundaries.** JSON/YAML loaders require the expected root shape; front matter requires a mapping; IDs, refs, and paths are parsed before use.

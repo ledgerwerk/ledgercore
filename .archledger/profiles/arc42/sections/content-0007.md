@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0007
+version: 1
 kind: content
 type: section
 section: deployment_view
@@ -21,6 +22,7 @@ Python 3.10+ process
 ├── downstream ledger application
 ├── ledgercore package
 ├── PyYAML package
+└── platformdirs package
 └── operating-system filesystem APIs
     └── application-selected local data directories
 ```
@@ -32,7 +34,7 @@ The package is installed into the same environment as its consumer. It opens onl
 - Build backend: Hatchling
 - Artifacts: Python wheel and source distribution
 - Package data: `py.typed`
-- Runtime dependency: PyYAML
+- Runtime dependencies: PyYAML and platformdirs
 - Development dependencies: pytest, Ruff, mypy, and PyYAML stubs
 - Release tools: build and Twine
 

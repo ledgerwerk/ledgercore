@@ -1,6 +1,7 @@
 ---
 schema_version: 3
 id: content-0001
+version: 1
 kind: content
 type: section
 section: introduction_and_goals
@@ -58,3 +59,5 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Remote storage, synchronization, indexing, querying, or database abstraction
 - TOML file parsing, migration orchestration, or a Ledger-family CLI
 - CLI error rendering or exit-code policy
+- Private sibling storage providers, external workspace configuration, and the `platformdirs` `project-relative` provider. These are reserved for a later release phase.
+- Automated layout migration. Migration to the canonical layout is downstream-owned and explicit.
