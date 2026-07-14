@@ -209,6 +209,7 @@ __marimo__/
 .codex
 
 ledgercore/_version.py
+.ledger/ledger.local.toml
 
 context_ledgercore.md
 context_ledgercore.index.json

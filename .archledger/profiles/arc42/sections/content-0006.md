@@ -52,6 +52,15 @@ Before replacement, a failure triggers best-effort cleanup and `AtomicWriteError
 4. Require the result to remain beneath that directory.
 5. Return a resolved `Path`, not a permanent authorization token.
 
+## Project layout resolution
+
+1. Discover `.ledger/ledger.toml` from a starting path while preserving legacy-source signals when needed for migration diagnostics.
+2. Parse the project manifest and optional local config from caller-supplied mappings.
+3. Select workspace and cache family roots from explicit arguments, environment overrides, local config, or built-in `platformdirs` defaults.
+4. Derive a checkout ID only when a ledger needs checkout-scoped data.
+5. Resolve repository mounts beneath `.ledger/` and external mounts beneath fixed `projects/<uuid>/project` or `projects/<uuid>/checkouts/<checkout-id>` roots.
+6. Return immutable layout objects without creating directories, markers, or config files.
+
 ## Reference normalization
 
 The parser tries canonical, legacy underscore, file-safe, and local forms in order. It normalizes tokens, requires a positive number, preserves wider padding, optionally supplies a ledger, then applies allowlists.

@@ -27,6 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "PyYAML",
+    "platformdirs",
 ]
 
 [project.urls]

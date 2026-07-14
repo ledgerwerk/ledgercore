@@ -225,10 +225,17 @@ if locator is not None:
 `.ledger.toml` over `ledger.toml`. It returns a `ConfigLocator` with
 `workspace_root`, `config_path`, and `source` fields.
 
+For canonical phase-2 project layout discovery, use `locate_ledger_project`
+instead. It looks for `.ledger/ledger.toml` first, preserves legacy discovery
+signals for migration-oriented callers, and returns a `LedgerProjectLocator`
+with `project_root`, `config_root`, `manifest_path`, `local_config_path`, and
+`source`.
+
 ### Shared ledger config convention
 
 Ledgercore-based tools should place shared project metadata under `[project]`
-and tool-specific settings under `[tools.<tool-name>]` in `.ledger.toml`.
+and tool-specific settings under `[tools.<tool-name>]` in `.ledger.toml` when
+they still use the schema-version-1 shared config compatibility convention.
 Ledgercore provides discovery and generic mapping selectors, but deliberately
 does not parse TOML or define tool schemas.
 
@@ -240,6 +247,53 @@ configs implicitly.
 
 `resolve_config_relative_path` resolves a path relative to the config file's
 parent directory, applying the same safety checks.
+
+### Canonical project layout resolution
+
+Phase-2 Ledger-family tools can resolve a common `.ledger/ledger.toml` topology
+through `ledgercore.layout`.
+
+```python
+from pathlib import Path
+
+from ledgercore import (
+    PlatformRoots,
+    locate_ledger_project,
+    parse_ledger_project_manifest,
+    resolve_ledger_layout,
+)
+
+locator = locate_ledger_project(Path.cwd())
+if locator is not None and not locator.is_legacy:
+    manifest = parse_ledger_project_manifest(
+        {
+            "schema_version": 2,
+            "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+            "ledgers": {
+                "taskledger": {
+                    "mounts": {
+                        "data": {"storage": "workspace", "path": "task/data"},
+                        "records": {"storage": "repository", "path": "task/records"},
+                    },
+                }
+            },
+        }
+    )
+    layout = resolve_ledger_layout(
+        locator,
+        manifest,
+        "taskledger",
+        platform_roots=PlatformRoots(
+            user_data=Path("/tmp/ledger-data"),
+            user_cache=Path("/tmp/ledger-cache"),
+        ),
+    )
+```
+
+`parse_ledger_project_manifest` and `parse_ledger_local_config` accept mappings,
+not TOML file paths. Repository mounts stay beneath `.ledger/`; workspace and
+cache mounts resolve under fixed `projects/<uuid>/project` or
+`projects/<uuid>/checkouts/<checkout-id>` structural roots.
 
 For arbitrary resolved paths, use `ensure_inside_base` before access and
 `relative_to_base` when storing a POSIX relative path. `resolve_under_base`

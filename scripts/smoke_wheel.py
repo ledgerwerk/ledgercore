@@ -21,7 +21,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ledgercore import __version__
+from ledgercore import (
+    PlatformRoots,
+    __version__,
+    locate_ledger_project,
+    parse_ledger_project_manifest,
+    resolve_ledger_layout,
+)
 from ledgercore.errors import IdFormatError
 from ledgercore.frontmatter import render_front_matter_text, split_front_matter_text
 from ledgercore.ids import LedgerIdFormat
@@ -67,6 +73,43 @@ def main() -> int:
         result = load_jsonl_object_map(path, key="id")
         assert not result.issues
         assert set(result.rows_by_key) == {"a", "b"}
+
+        project_root = Path(d) / "project"
+        manifest_dir = project_root / ".ledger"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "ledger.toml").write_text(
+            "schema_version = 2\n", encoding="utf-8"
+        )
+        locator = locate_ledger_project(project_root)
+        assert locator is not None
+        manifest = parse_ledger_project_manifest(
+            {
+                "schema_version": 2,
+                "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+                "ledgers": {
+                    "taskledger": {
+                        "config": {"location": "project", "path": "task/config.toml"},
+                        "mounts": {
+                            "data": {"storage": "workspace", "path": "task/data"}
+                        },
+                    }
+                },
+            }
+        )
+        layout = resolve_ledger_layout(
+            locator,
+            manifest,
+            "taskledger",
+            platform_roots=PlatformRoots(
+                user_data=Path(d) / "platform-data",
+                user_cache=Path(d) / "platform-cache",
+            ),
+        )
+        assert (
+            layout.tool_config_path
+            == (project_root / ".ledger" / "task" / "config.toml").resolve()
+        )
+        assert "checkouts" in layout.mounts["data"].path.parts
 
     assert utc_now_iso().endswith("Z")
 

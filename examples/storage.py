@@ -1,11 +1,17 @@
-"""Example: working with atomic writes, JSON, YAML, and path helpers."""
+"""Example: working with atomic writes, JSON, YAML, path helpers, and layout."""
 
 import tempfile
 from pathlib import Path
 
 from ledgercore.atomic import atomic_create_text, atomic_write_text
+from ledgercore.config import locate_ledger_project
 from ledgercore.errors import AtomicWriteError
 from ledgercore.jsonio import load_json_object, write_json
+from ledgercore.layout import (
+    PlatformRoots,
+    parse_ledger_project_manifest,
+    resolve_ledger_layout,
+)
 from ledgercore.paths import (
     locate_config,
     resolve_config_relative_path,
@@ -61,5 +67,43 @@ with tempfile.TemporaryDirectory() as tmp:
         field_name="records_dir",
     )
     assert records_dir.name == "records"
+
+    # --- Project layout resolution ---
+    project_root = base / "project"
+    manifest_dir = project_root / ".ledger"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "ledger.toml").write_text("schema_version = 2\n", encoding="utf-8")
+    locator = locate_ledger_project(project_root)
+    assert locator is not None
+
+    manifest = parse_ledger_project_manifest(
+        {
+            "schema_version": 2,
+            "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+            "ledgers": {
+                "taskledger": {
+                    "config": {"location": "project", "path": "task/config.toml"},
+                    "mounts": {
+                        "data": {"storage": "workspace", "path": "task/data"},
+                        "records": {"storage": "repository", "path": "task/records"},
+                    },
+                }
+            },
+        }
+    )
+    layout = resolve_ledger_layout(
+        locator,
+        manifest,
+        "taskledger",
+        platform_roots=PlatformRoots(
+            user_data=base / "platform-data",
+            user_cache=base / "platform-cache",
+        ),
+    )
+    assert (
+        layout.mounts["records"].path
+        == (project_root / ".ledger" / "task" / "records").resolve()
+    )
+    assert "checkouts" in layout.mounts["data"].path.parts
 
 print("storage example passed")

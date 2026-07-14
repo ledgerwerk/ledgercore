@@ -9,6 +9,7 @@ from ledgercore.errors import (
     JsonStoreError,
     LedgerConfigError,
     LedgerCoreError,
+    LedgerLayoutError,
     PathValidationError,
     StorageError,
     YamlStoreError,
@@ -34,6 +35,7 @@ class TestLedgerCoreError:
         cases = [
             (LedgerCoreError, "LEDGERCORE_ERROR"),
             (LedgerConfigError, "LEDGER_CONFIG_ERROR"),
+            (LedgerLayoutError, "LEDGER_LAYOUT_ERROR"),
             (StorageError, "STORAGE_ERROR"),
             (AtomicWriteError, "ATOMIC_WRITE_ERROR"),
             (FrontMatterError, "FRONTMATTER_ERROR"),
@@ -59,6 +61,12 @@ class TestLedgerCoreError:
             IdFormatError("f"),
             StorageError("g"),
             LedgerConfigError("h"),
+            LedgerLayoutError("i"),
         ]
         for err in errors:
             assert isinstance(err, LedgerCoreError)
+
+    def test_layout_error_is_config_error(self) -> None:
+        err = LedgerLayoutError("layout failed")
+        assert isinstance(err, LedgerConfigError)
+        assert err.code == "LEDGER_LAYOUT_ERROR"

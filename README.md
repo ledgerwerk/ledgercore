@@ -1,11 +1,11 @@
 # ledgercore
 
-Generic, typed storage and reference primitives for ledger-like Python applications.
+Generic, typed storage, project-layout, and reference primitives for ledger-like Python applications.
 
 `ledgercore` is a small Python library for projects that store structured records
 as files. It provides reusable primitives for atomic writes, YAML front matter,
-deterministic JSON/YAML storage, safe relative paths, config discovery, numeric
-IDs, and cross-ledger references.
+deterministic JSON/YAML storage, safe relative paths, Ledger-family project
+layout discovery and resolution, numeric IDs, and cross-ledger references.
 
 It has no CLI and no dependency on any downstream ledger application.
 
@@ -23,6 +23,7 @@ reinvent them.
 - YAML front matter read/write helpers.
 - Deterministic JSON, JSONL, and YAML file I/O.
 - Safe relative POSIX path validation.
+- Canonical Ledger-family project layout discovery and resolution.
 - Generic content fingerprints and path-text normalization.
 - Upward config discovery.
 - Prefixed numeric ID formatting.
@@ -47,6 +48,7 @@ Requirements:
 
 - Python 3.10+
 - PyYAML
+- platformdirs
 
 ## Quick start
 
@@ -247,11 +249,63 @@ converting between resolved paths and safe base-relative paths. The separate
 not authorize filesystem access. It supports `"basic"`, `"wide"`, and
 `"none"` punctuation profiles plus custom translations.
 
+## Ledger project layout
+
+Phase-2 Ledger-family projects use `.ledger/ledger.toml` as the canonical
+shared manifest and `.ledger/ledger.local.toml` for machine-local overrides.
+`ledgercore` parses mappings only: downstream tools remain responsible for TOML
+loading, migration workflows, and any CLI behavior.
+
+```python
+from pathlib import Path
+
+from ledgercore import (
+    PlatformRoots,
+    locate_ledger_project,
+    parse_ledger_project_manifest,
+    resolve_ledger_layout,
+)
+
+locator = locate_ledger_project(Path.cwd())
+if locator is not None and not locator.is_legacy:
+    manifest = parse_ledger_project_manifest(
+        {
+            "schema_version": 2,
+            "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+            "ledgers": {
+                "taskledger": {
+                    "config": {"location": "project", "path": "task/config.toml"},
+                    "mounts": {
+                        "data": {"storage": "workspace", "path": "task/data"},
+                        "records": {"storage": "repository", "path": "task/records"},
+                    },
+                }
+            },
+        }
+    )
+    layout = resolve_ledger_layout(
+        locator,
+        manifest,
+        "taskledger",
+        platform_roots=PlatformRoots(
+            user_data=Path("/tmp/ledger-data"),
+            user_cache=Path("/tmp/ledger-cache"),
+        ),
+    )
+    data_dir = layout.mounts["data"].path
+    records_dir = layout.mounts["records"].path
+```
+
+Repository mounts resolve beneath `.ledger/`; workspace and cache mounts resolve
+under `projects/<project-uuid>/project` or
+`projects/<project-uuid>/checkouts/<checkout-id>` depending on scope.
+
 ## Shared ledger config convention
 
-Ledgercore-based tools should use `.ledger.toml` as the canonical workspace
-config. Shared project metadata belongs under `[project]`; tool-specific
-configuration belongs under `[tools.<tool-name>]`.
+Ledgercore-based tools may still use the schema-version-1 shared config
+convention as a compatibility surface. In that mode, shared project metadata
+belongs under `[project]`; tool-specific configuration belongs under
+`[tools.<tool-name>]` in `.ledger.toml` or `ledger.toml`.
 
 ```toml
 schema_version = 1
@@ -282,8 +336,9 @@ locator = locate_ledger_config(
 )
 ```
 
-Canonical files win over legacy fallbacks. Applications should not implicitly
-merge both live configs.
+Canonical shared-config files win over legacy fallbacks. Applications should not
+implicitly merge both live configs. For the newer layout API, prefer
+`locate_ledger_project` and `.ledger/ledger.toml`.
 
 ## Atomic writes
 

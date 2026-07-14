@@ -9,6 +9,18 @@ Public API grouped by module.
 Shared ledger workspace config discovery and namespaced mapping selection.
 This module does not parse TOML or define tool-specific schemas.
 
+`LEDGER_PROJECT_MANIFEST`
+
+: Canonical manifest path segment: `".ledger/ledger.toml"`.
+
+`LEDGER_PROJECT_LOCAL_CONFIG`
+
+: Canonical machine-local override path segment: `".ledger/ledger.local.toml"`.
+
+`LEDGER_LEGACY_SHARED_CONFIGS`
+
+: Compatibility aliases for schema-version-1 shared config discovery.
+
 `LEDGER_CONFIG_FILENAMES`
 
 : Canonical hidden-first names: `(".ledger.toml", "ledger.toml")`.
@@ -20,6 +32,15 @@ This module does not parse TOML or define tool-specific schemas.
 `locate_ledger_config(start, *, legacy_filenames=(), ...)`
 
 : Locate a canonical config or legacy fallback.
+
+`LedgerProjectLocator`
+
+: Frozen dataclass with `project_root`, `config_root`, `manifest_path`,
+`local_config_path`, `source`, and `is_legacy`.
+
+`locate_ledger_project(start, *, legacy_tool_filenames=(), default=False)`
+
+: Locate a canonical `.ledger/ledger.toml` project manifest or a legacy fallback.
 
 `select_project_config(document, *, table_name="project")`
 
@@ -46,17 +67,18 @@ Atomic UTF-8 text writes and race-safe file creation.
 
 Shared exception hierarchy with stable error codes.
 
-| Class                 | Code                    | Description                                           |
-| --------------------- | ----------------------- | ----------------------------------------------------- |
-| `LedgerCoreError`     | `LEDGERCORE_ERROR`      | Base exception for all ledgercore errors.             |
-| `LedgerConfigError`   | `LEDGER_CONFIG_ERROR`   | Raised for missing or invalid shared config tables.   |
-| `StorageError`        | `STORAGE_ERROR`         | Base exception for storage-related errors.            |
-| `AtomicWriteError`    | `ATOMIC_WRITE_ERROR`    | Raised when an atomic write operation fails.          |
-| `FrontMatterError`    | `FRONTMATTER_ERROR`     | Raised when front matter parsing or writing fails.    |
-| `JsonStoreError`      | `JSON_STORE_ERROR`      | Raised when a JSON store operation fails.             |
-| `YamlStoreError`      | `YAML_STORE_ERROR`      | Raised when a YAML store operation fails.             |
-| `PathValidationError` | `PATH_VALIDATION_ERROR` | Raised when a path fails validation.                  |
-| `IdFormatError`       | `ID_FORMAT_ERROR`       | Raised when an ID does not match the expected format. |
+| Class                 | Code                    | Description                                               |
+| --------------------- | ----------------------- | --------------------------------------------------------- |
+| `LedgerCoreError`     | `LEDGERCORE_ERROR`      | Base exception for all ledgercore errors.                 |
+| `LedgerConfigError`   | `LEDGER_CONFIG_ERROR`   | Raised for missing or invalid shared config tables.       |
+| `LedgerLayoutError`   | `LEDGER_LAYOUT_ERROR`   | Raised for invalid or unresolvable Ledger-family layouts. |
+| `StorageError`        | `STORAGE_ERROR`         | Base exception for storage-related errors.                |
+| `AtomicWriteError`    | `ATOMIC_WRITE_ERROR`    | Raised when an atomic write operation fails.              |
+| `FrontMatterError`    | `FRONTMATTER_ERROR`     | Raised when front matter parsing or writing fails.        |
+| `JsonStoreError`      | `JSON_STORE_ERROR`      | Raised when a JSON store operation fails.                 |
+| `YamlStoreError`      | `YAML_STORE_ERROR`      | Raised when a YAML store operation fails.                 |
+| `PathValidationError` | `PATH_VALIDATION_ERROR` | Raised when a path fails validation.                      |
+| `IdFormatError`       | `ID_FORMAT_ERROR`       | Raised when an ID does not match the expected format.     |
 
 All exceptions accept an optional `code` keyword argument to override the default code.
 
@@ -167,6 +189,34 @@ Safe relative POSIX path validation, config discovery, config-relative resolutio
 | `ConfigLocator`                                                                         | Frozen dataclass: `workspace_root`, `config_path`, `source`.        |
 | `locate_config(start, filenames, *, default_filename=None)`                             | Find a config file and return a `ConfigLocator`.                    |
 | `resolve_config_relative_path(config_path, value, *, field_name)`                       | Resolve a relative path relative to the config file's directory.    |
+
+(ledgercorelayout)=
+
+## `ledgercore.layout`
+
+Typed Ledger-family project layout parsing and resolution. The public parser
+APIs accept mappings rather than TOML file paths.
+
+| Symbol                                                          | Description                                                                                                               |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `StorageClass`                                                  | Literal type: `"repository"`, `"workspace"`, or `"cache"`.                                                                |
+| `StorageScope`                                                  | Literal type: `"project"` or `"checkout"`.                                                                                |
+| `ConfigLocation`                                                | Literal type: `"project"` or `"workspace"`.                                                                               |
+| `ProviderKind`                                                  | Literal type reserved for built-in and future provider kinds.                                                             |
+| `StorageResolutionSource`                                       | Literal type: `"repository"`, `"explicit"`, `"environment"`, `"local-root"`, `"local-provider"`, or `"manifest-default"`. |
+| `PlatformRoots`                                                 | Frozen dataclass with `user_data` and `user_cache` family-root paths.                                                     |
+| `StorageProviderDefinition`                                     | Frozen dataclass reserved for named provider definitions.                                                                 |
+| `LedgerMount`                                                   | Frozen dataclass describing one named mount.                                                                              |
+| `ToolConfigDefinition`                                          | Frozen dataclass describing one ledger config location.                                                                   |
+| `LedgerRegistration`                                            | Frozen dataclass with one ledger name, config definition, and named mounts.                                               |
+| `LedgerProjectManifest`                                         | Frozen dataclass describing the parsed schema-version-2 project manifest.                                                 |
+| `LedgerLocalConfig`                                             | Frozen dataclass for optional machine-local overrides.                                                                    |
+| `ResolvedMount`                                                 | Frozen dataclass with resolved mount path, scoped root, and source.                                                       |
+| `ResolvedLedgerLayout`                                          | Frozen dataclass with resolved project, config, optional tool config, checkout ID, and named mounts.                      |
+| `parse_ledger_project_manifest(document)`                       | Strictly parse a schema-version-2 project manifest mapping.                                                               |
+| `parse_ledger_local_config(document, *, project_root)`          | Parse the optional schema-version-1 local override mapping.                                                               |
+| `derive_checkout_id(project_root)`                              | Derive a deterministic checkout ID from the normalized project path.                                                      |
+| `resolve_ledger_layout(locator, manifest, ledger_name, *, ...)` | Resolve repository, workspace, cache, and tool-config paths for one registered ledger.                                    |
 
 (ledgercorepath-text)=
 

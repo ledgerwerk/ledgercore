@@ -13,7 +13,7 @@ Generated from archledger records. Do not edit this generated file directly.
 
 ## Purpose
 
-`ledgercore` is a small, typed Python library that supplies reusable storage and reference primitives for file-backed ledger applications. It centralizes low-level behavior shared by task, architecture, specification, and similar tools without defining a domain-specific record model.
+`ledgercore` is a small, typed Python library that supplies reusable storage, project-layout, and reference primitives for file-backed ledger applications. It centralizes low-level behavior shared by task, architecture, release, specification, and similar tools without defining a domain-specific record model.
 
 The library is embedded by a downstream Python application. It has no CLI, server, database, background process, or network protocol.
 
@@ -32,15 +32,16 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 2. Produce deterministic, human-readable JSON, JSONL, YAML, and YAML-front-matter files.
 3. Validate untrusted relative path strings before resolving them under a trusted base.
 4. Provide canonical local and cross-ledger numeric identifiers.
-5. Expose a typed, framework-neutral API with a shared exception hierarchy.
-6. Keep domain schemas, orchestration, locking, synchronization, and user interfaces in downstream applications.
+5. Discover canonical Ledger-family project manifests and resolve repository, workspace, and cache topology without writing to the filesystem.
+6. Expose a typed, framework-neutral API with a shared exception hierarchy.
+7. Keep domain schemas, TOML parsing, orchestration, locking, synchronization, migrations, and user interfaces in downstream applications.
 
 ## Quality priorities
 
 1. **Correctness and data integrity:** invalid shapes and unsafe paths fail explicitly; atomic writers avoid partial replacement.
 2. **Predictability:** canonical formatting, sorted iteration, explicit policies, and stable exception categories.
-3. **Portability:** Python 3.10+, UTF-8 text, `pathlib`, and standard filesystem operations.
-4. **Maintainability:** one-purpose modules, strict type checking, broad unit tests, and one runtime dependency.
+3. **Portability:** Python 3.10+, UTF-8 text, `pathlib`, `platformdirs`, and standard filesystem operations.
+4. **Maintainability:** one-purpose modules, strict type checking, broad unit tests, and a small reviewed dependency surface.
 5. **Performance:** repository-scale files; whole-file processing is favored over streaming complexity.
 
 ## Non-goals
@@ -50,6 +51,7 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Transactions spanning multiple files
 - Authentication, authorization, encryption, or secret management
 - Remote storage, synchronization, indexing, querying, or database abstraction
+- TOML file parsing, migration orchestration, or a Ledger-family CLI
 - CLI error rendering or exit-code policy
 
 ## Requirements Overview
@@ -60,20 +62,21 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 
 # Architecture Constraints
 
-| Constraint                            | Architectural consequence                                                             |
-| ------------------------------------- | ------------------------------------------------------------------------------------- |
-| Python 3.10 or newer                  | Modern annotations, dataclasses, literals, and `pathlib` are available                |
-| PyYAML is the sole runtime dependency | YAML behavior follows safe PyYAML APIs; all other facilities use the standard library |
-| Typed package (`py.typed`)            | Public behavior must remain statically consumable; strict mypy is the target          |
-| Local filesystem abstraction          | Atomicity and durability depend on host filesystem and OS semantics                   |
-| UTF-8 text files                      | Text readers and writers explicitly encode/decode UTF-8                               |
-| No application framework              | Downstream code owns logging, CLI output, configuration, and recovery                 |
-| Apache-2.0 distribution               | Source and packages remain compatible with that license                               |
+| Constraint                    | Architectural consequence                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| Python 3.10 or newer          | Modern annotations, dataclasses, literals, and `pathlib` are available                    |
+| Reviewed runtime dependencies | PyYAML handles YAML safely and `platformdirs` provides OS-correct user data/cache roots   |
+| Typed package (`py.typed`)    | Public behavior must remain statically consumable; strict mypy is the target              |
+| Local filesystem abstraction  | Atomicity, layout resolution, and durability depend on host filesystem and OS semantics   |
+| UTF-8 text files              | Text readers and writers explicitly encode/decode UTF-8                                   |
+| No application framework      | Downstream code owns logging, CLI output, configuration, parsing, migration, and recovery |
+| Apache-2.0 distribution       | Source and packages remain compatible with that license                                   |
 
 ## Product constraints
 
 - The package is pre-1.0 (`0.2.0`), with an intent to keep the 0.2.x public API stable where practical.
 - The top-level package re-exports a curated convenience API, including `__version__`.
+- The phase-2 layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
 - Existing compatibility aliases and documented legacy reference syntax are retained.
 - Persisted formats must stay inspectable with ordinary text tools.
 
@@ -89,6 +92,7 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Atomic replacement requires source and destination on the same filesystem, so temporary files are created in the target directory.
 - `fsync` improves crash durability but cannot guarantee every device or filesystem.
 - Path confinement observes symlink resolution at validation time; downstream code must account for time-of-check/time-of-use races in hostile writable trees.
+- Layout discovery and resolution must not create directories, config files, caches, or markers.
 
 # Context and Scope
 
@@ -101,22 +105,24 @@ Downstream Python application
         | imports functions and dataclasses
         v
 ledgercore ----> PyYAML
-    |
+    |          \
+    |           -> platformdirs
     v
 Local filesystem
 ```
 
-`ledgercore` is not directly operated by an end user. A downstream application invokes it to validate identifiers and paths, parse or render records, and read or update local files. The application supplies domain semantics, chooses locations, and translates `LedgerCoreError` failures into its own interface.
+`ledgercore` is not directly operated by an end user. A downstream application invokes it to validate identifiers and paths, parse or render records, discover canonical Ledger-family project markers, and resolve read-only storage topology. The application supplies domain semantics, loads TOML into mappings, chooses locations, and translates `LedgerCoreError` failures into its own interface.
 
 ## External interfaces
 
-| Interface            | Contract                                                                                      |
-| -------------------- | --------------------------------------------------------------------------------------------- |
-| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions               |
-| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, and front-matter documents; atomic replacement where requested |
-| PyYAML               | Safe YAML loading and dumping                                                                 |
-| Environment variable | An optional caller-selected variable can disable fsync                                        |
-| Clock                | Current time is rendered at second precision with a `Z` suffix                                |
+| Interface            | Contract                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions                                   |
+| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, and front-matter documents; `.ledger/` layouts; atomic replacement where requested |
+| PyYAML               | Safe YAML loading and dumping                                                                                     |
+| platformdirs         | OS-correct user data and cache roots for the built-in layout providers                                            |
+| Environment variable | Optional caller-selected variables can disable fsync or override workspace/cache roots and checkout identity      |
+| Clock                | Current time is rendered at second precision with a `Z` suffix                                                    |
 
 ## Inside the boundary
 
@@ -124,6 +130,8 @@ Local filesystem
 - Generic text read/write/merge/hash helpers
 - JSON, JSONL, YAML, and front matter serialization
 - Path normalization, strict path validation, confinement, and config discovery
+- Canonical Ledger-family project discovery and typed layout parsing
+- Read-only repository, workspace, cache, and tool-config path resolution
 - Numeric ID and cross-ledger reference parsing/formatting
 - SHA-256 fingerprints and UTC timestamp formatting
 - Package-specific exception taxonomy
@@ -131,12 +139,13 @@ Local filesystem
 ## Outside the boundary
 
 - Record schemas, ownership, and workflows
+- TOML parsing, migration commands, and layout-writing workflows
 - Multi-file consistency, recovery journals, and inter-process locking
 - Filesystem permissions and trust policy
 - UI, observability, configuration parsing, and network access
 - Choice of ledger codes, kinds, and relation semantics
 
-The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state.
+The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state and performs no writes during layout discovery or resolution.
 
 ## Business Context
 
@@ -144,20 +153,22 @@ The downstream application owns all persisted data. `ledgercore` keeps no catalo
 
 # Solution Strategy
 
-The architecture is a stateless utility library organized by technical concern. Each module offers a narrow contract and composes lower-level primitives instead of introducing services or framework abstractions.
+The architecture remains a stateless utility library organized by technical concern. Phase 2 adds a dedicated project-layout layer that standardizes shared Ledger-family topology without introducing services, migration flows, or process-global state.
 
 1. **Filesystem safety by explicit primitives.** Atomic replacement writes a temporary sibling, optionally flushes it, calls `os.replace`, and optionally flushes the parent. Create-only writes use `O_CREAT | O_EXCL`.
 2. **Validation at format boundaries.** JSON/YAML loaders require the expected root shape; front matter requires a mapping; IDs, refs, and paths are parsed before use.
 3. **Canonical representations.** JSON hashing uses compact sorted-key output; JSON files use sorted keys and a final newline; references normalize aliases to one model.
 4. **Explicit policies.** Missing/empty handling, atomic writes, sorting, body normalization, recursion, aliases, allowlists, and fsync behavior are arguments.
-5. **Immutable value objects.** Parsed IDs, references, fingerprints, config locations, and JSONL results use frozen dataclasses.
-6. **Layered errors.** Modules wrap low-level parse and I/O failures in package-specific errors and preserve causes.
-7. **No retained state.** Calls depend only on arguments, filesystem state, environment, and clock.
+5. **Read-only layout resolution.** Canonical project discovery, manifest parsing, checkout identity, and storage-path resolution are mapping-based and perform no writes.
+6. **Immutable value objects.** Parsed IDs, references, fingerprints, config locations, layouts, and JSONL results use frozen dataclasses.
+7. **Layered errors.** Modules wrap low-level parse and I/O failures in package-specific errors and preserve causes.
+8. **No retained state.** Calls depend only on arguments, filesystem state, environment, platform conventions, and clock.
 
 ## Decomposition rationale
 
 - Serialization modules delegate atomic output to `atomic`.
 - `hashing` composes front matter parsing and canonical JSON.
+- `layout` composes `config`, `ids`, and strict path helpers while keeping TOML parsing downstream.
 - `path_text` is separate from `paths`: normalization aids matching, while authorization requires strict validation.
 - `refs` and `ids` are separate because references add namespaces and aliases while generic IDs support configurable segments.
 - The package root provides discoverability; direct module imports permit narrow dependencies.
@@ -239,6 +250,15 @@ Before replacement, a failure triggers best-effort cleanup and `AtomicWriteError
 3. Join it to the resolved config directory.
 4. Require the result to remain beneath that directory.
 5. Return a resolved `Path`, not a permanent authorization token.
+
+## Project layout resolution
+
+1. Discover `.ledger/ledger.toml` from a starting path while preserving legacy-source signals when needed for migration diagnostics.
+2. Parse the project manifest and optional local config from caller-supplied mappings.
+3. Select workspace and cache family roots from explicit arguments, environment overrides, local config, or built-in `platformdirs` defaults.
+4. Derive a checkout ID only when a ledger needs checkout-scoped data.
+5. Resolve repository mounts beneath `.ledger/` and external mounts beneath fixed `projects/<uuid>/project` or `projects/<uuid>/checkouts/<checkout-id>` roots.
+6. Return immutable layout objects without creating directories, markers, or config files.
 
 ## Reference normalization
 
@@ -335,11 +355,13 @@ Compatibility uses permissive input and canonical output. Public additions shoul
 | Canonical output with selected legacy inputs | Accepted | Stored form is stable while migrations remain practical                                 |
 | Frozen dataclasses for parsed values         | Accepted | Values are explicit and resistant to accidental mutation                                |
 | Package-specific exception categories        | Accepted | Consumers avoid dependency-specific exception coupling                                  |
+| Canonical `.ledger` project layout           | Accepted | Shared project identity and storage topology stay consistent without adding a CLI       |
+| Reviewed runtime dependencies                | Accepted | `platformdirs` is allowed when standard-library reimplementation would be riskier       |
 | No domain schemas or reverse dependencies    | Accepted | Consumers validate domain data above primitive shapes                                   |
 | Complete-file processing                     | Accepted | Simpler verification, but unsuitable for very large files                               |
 | Curated package facade                       | Accepted | Convenient imports require deliberate `__all__` maintenance                             |
 
-Decision drivers are source-control friendliness, minimal dependencies, clear downstream ownership, deterministic behavior, and prevention of common filesystem corruption and traversal mistakes. The implementation does not claim database-grade transactions or security in an adversarial filesystem.
+Decision drivers are source-control friendliness, a small reviewed dependency surface, clear downstream ownership, deterministic behavior, and prevention of common filesystem corruption and traversal mistakes. The implementation does not claim database-grade transactions or security in an adversarial filesystem.
 
 # Quality Requirements
 

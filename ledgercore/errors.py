@@ -18,6 +18,12 @@ class LedgerConfigError(LedgerCoreError):
     code: str = "LEDGER_CONFIG_ERROR"
 
 
+class LedgerLayoutError(LedgerConfigError):
+    """Raised when a Ledger-family project layout is invalid or unresolvable."""
+
+    code: str = "LEDGER_LAYOUT_ERROR"
+
+
 class StorageError(LedgerCoreError):
     """Base exception for storage-related errors."""
 

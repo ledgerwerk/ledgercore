@@ -18,7 +18,7 @@ source_refs:
 
 ## Purpose
 
-`ledgercore` is a small, typed Python library that supplies reusable storage and reference primitives for file-backed ledger applications. It centralizes low-level behavior shared by task, architecture, specification, and similar tools without defining a domain-specific record model.
+`ledgercore` is a small, typed Python library that supplies reusable storage, project-layout, and reference primitives for file-backed ledger applications. It centralizes low-level behavior shared by task, architecture, release, specification, and similar tools without defining a domain-specific record model.
 
 The library is embedded by a downstream Python application. It has no CLI, server, database, background process, or network protocol.
 
@@ -37,15 +37,16 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 2. Produce deterministic, human-readable JSON, JSONL, YAML, and YAML-front-matter files.
 3. Validate untrusted relative path strings before resolving them under a trusted base.
 4. Provide canonical local and cross-ledger numeric identifiers.
-5. Expose a typed, framework-neutral API with a shared exception hierarchy.
-6. Keep domain schemas, orchestration, locking, synchronization, and user interfaces in downstream applications.
+5. Discover canonical Ledger-family project manifests and resolve repository, workspace, and cache topology without writing to the filesystem.
+6. Expose a typed, framework-neutral API with a shared exception hierarchy.
+7. Keep domain schemas, TOML parsing, orchestration, locking, synchronization, migrations, and user interfaces in downstream applications.
 
 ## Quality priorities
 
 1. **Correctness and data integrity:** invalid shapes and unsafe paths fail explicitly; atomic writers avoid partial replacement.
 2. **Predictability:** canonical formatting, sorted iteration, explicit policies, and stable exception categories.
-3. **Portability:** Python 3.10+, UTF-8 text, `pathlib`, and standard filesystem operations.
-4. **Maintainability:** one-purpose modules, strict type checking, broad unit tests, and one runtime dependency.
+3. **Portability:** Python 3.10+, UTF-8 text, `pathlib`, `platformdirs`, and standard filesystem operations.
+4. **Maintainability:** one-purpose modules, strict type checking, broad unit tests, and a small reviewed dependency surface.
 5. **Performance:** repository-scale files; whole-file processing is favored over streaming complexity.
 
 ## Non-goals
@@ -55,4 +56,5 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Transactions spanning multiple files
 - Authentication, authorization, encryption, or secret management
 - Remote storage, synchronization, indexing, querying, or database abstraction
+- TOML file parsing, migration orchestration, or a Ledger-family CLI
 - CLI error rendering or exit-code policy
