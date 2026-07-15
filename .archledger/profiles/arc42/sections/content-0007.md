@@ -1,5 +1,5 @@
 ---
-schema_version: 3
+schema_version: 4
 id: content-0007
 version: 1
 kind: content
@@ -8,10 +8,7 @@ section: deployment_view
 title: Deployment View
 order: 70
 status: accepted
-date: "2026-06-13"
 body_format: markdown
-created_at: "2026-06-13T08:41:40.792531+00:00"
-updated_at: "2026-06-13T08:56:00.329158+00:00"
 source_refs:
   - path: pyproject.toml
     reason: Distribution and runtime deployment metadata

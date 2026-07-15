@@ -1,6 +1,6 @@
 ---
 title: "Architecture Documentation"
-version: 1
+version: 2
 generator: "archledger 0.3.2.dev1+g505ad5c4c"
 arc42_template_version: "9.0-EN"
 ---
@@ -53,7 +53,7 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Remote storage, synchronization, indexing, querying, or database abstraction
 - TOML file parsing, migration orchestration, or a Ledger-family CLI
 - CLI error rendering or exit-code policy
-- Private sibling storage providers, external workspace configuration, and the `platformdirs` `project-relative` provider. These are reserved for a later release phase.
+- Generic provider declarations, direct cache or checkout providers, workspace tool configuration, and external Git synchronization. The 0.4.0 layout surface supports one explicitly selected built-in direct sibling workspace provider.
 - Automated layout migration. Migration to the canonical layout is downstream-owned and explicit.
 
 ## Requirements Overview
@@ -82,12 +82,12 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 
 ## Product constraints
 
-- The package is pre-1.0 (`0.3.0`); patch releases preserve the current minor API where practical, and minor releases may intentionally evolve public APIs before 1.0 with changelog and migration guidance. The 0.3.0 release is the pilot API for the canonical Ledger-family layout.
+- The package is pre-1.0 (`0.4.0`); patch releases preserve the current minor API where practical, and minor releases may intentionally evolve public APIs before 1.0 with changelog and migration guidance. The 0.4.0 release adds one fixed built-in direct sibling workspace provider while preserving namespaced root overrides.
 - The top-level package re-exports a curated convenience API, including `__version__`. The curated root layout facade exposes `LedgerProjectLocator`, `ResolvedLedgerLayout`, `locate_ledger_project`, `parse_ledger_project_manifest`, `parse_ledger_local_config`, `resolve_ledger_layout`, and `derive_checkout_id`; detailed layout dataclasses remain under `ledgercore.layout`.
 - The canonical layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
 - Existing compatibility aliases and documented legacy reference syntax are retained.
 - Persisted formats must stay inspectable with ordinary text tools.
-- The private sibling provider phase and the external workspace configuration phase are explicitly out of scope for 0.3.0. `ledgercore` accepts provider values in the local override for migration diagnostics but rejects them in the resolver until that phase lands.
+- The machine-local provider value `sibling-ledger` is the only direct backend. It resolves project-scoped workspace mounts below `<project-root>/../ledger` and requires `.ledger-store`; arbitrary provider declarations, direct cache or checkout mounts, workspace tool configuration, and fallback are unsupported.
 
 ## Engineering constraints
 
@@ -126,14 +126,14 @@ Local filesystem
 
 ## External interfaces
 
-| Interface            | Contract                                                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions                                   |
-| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, and front-matter documents; `.ledger/` layouts; atomic replacement where requested |
-| PyYAML               | Safe YAML loading and dumping                                                                                     |
-| platformdirs         | OS-correct user data and cache roots for the built-in layout providers                                            |
-| Environment variable | Optional caller-selected variables can disable fsync or override workspace/cache roots and checkout identity      |
-| Clock                | Current time is rendered at second precision with a `Z` suffix                                                    |
+| Interface            | Contract                                                                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions                                                                 |
+| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, and front-matter documents; `.ledger/` layouts; direct sibling store markers; atomic replacement where requested |
+| PyYAML               | Safe YAML loading and dumping                                                                                                                   |
+| platformdirs         | OS-correct user data and cache roots for the built-in layout providers                                                                          |
+| Environment variable | Optional caller-selected variables can disable fsync or override workspace/cache roots and checkout identity                                    |
+| Clock                | Current time is rendered at second precision with a `Z` suffix                                                                                  |
 
 ## Inside the boundary
 
@@ -153,7 +153,7 @@ Local filesystem
 - TOML parsing, migration commands, and layout-writing workflows
 - Multi-file consistency, recovery journals, and inter-process locking
 - Filesystem permissions and trust policy
-- UI, observability, configuration parsing, and network access
+- UI, observability, configuration parsing, Git synchronization, and network access
 - Choice of ledger codes, kinds, and relation semantics
 
 The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state and performs no writes during layout discovery or resolution.
@@ -168,13 +168,13 @@ The downstream application owns all persisted data. `ledgercore` keeps no catalo
 
 # Solution Strategy
 
-The architecture remains a stateless utility library organized by technical concern. The 0.3.0 canonical layout layer standardizes shared Ledger-family topology without introducing services, migration flows, or process-global state.
+The architecture remains a stateless utility library organized by technical concern. The 0.4.0 canonical layout layer standardizes shared Ledger-family topology and adds one explicitly selected direct sibling workspace convention without introducing services, Git synchronization, migration flows, or process-global state.
 
 1. **Filesystem safety by explicit primitives.** Atomic replacement writes a temporary sibling, optionally flushes it, calls `os.replace`, and optionally flushes the parent. Create-only writes use `O_CREAT | O_EXCL`.
 2. **Validation at format boundaries.** JSON/YAML loaders require the expected root shape; front matter requires a mapping; IDs, refs, and paths are parsed before use.
 3. **Canonical representations.** JSON hashing uses compact sorted-key output; JSON files use sorted keys and a final newline; references normalize aliases to one model.
 4. **Explicit policies.** Missing/empty handling, atomic writes, sorting, body normalization, recursion, aliases, allowlists, and fsync behavior are arguments.
-5. **Read-only layout resolution.** Canonical project discovery, manifest parsing, checkout identity, and storage-path resolution are mapping-based and perform no writes.
+5. **Read-only layout resolution.** Canonical project discovery, manifest parsing, checkout identity, sibling marker validation, and storage-path resolution are mapping-based and perform no writes. The sibling backend fails without fallback when its root or marker is absent.
 6. **Immutable value objects.** Parsed IDs, references, fingerprints, config locations, layouts, and JSONL results use frozen dataclasses.
 7. **Layered errors.** Modules wrap low-level parse and I/O failures in package-specific errors and preserve causes.
 8. **No retained state.** Calls depend only on arguments, filesystem state, environment, platform conventions, and clock.
@@ -426,19 +426,21 @@ Most functions are pure transformations or accept explicit paths and policies. T
 
 # Risks and Technical Debt
 
-| Risk / debt                                         | Impact                                                  | Mitigation                                                                      |
-| --------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| No inter-process lock or transactional ID allocator | Concurrent scans can choose the same ID                 | Pair with exclusive create and retry downstream                                 |
-| Filesystem-dependent atomicity/fsync                | Crash behavior varies on unusual or network filesystems | Colocate temp files and test target environments                                |
-| Symlink changes after path validation               | Hostile writable trees can defeat confinement           | Treat base trees as trusted; consider descriptor-relative APIs for hardened use |
-| Whole-file processing                               | Memory and latency scale with size                      | Restrict use to ledger-scale artifacts                                          |
-| YAML implicit typing                                | Scalar interpretation can surprise                      | Safe loading, timestamp-string option, minimal quoting, and downstream schemas  |
-| Error code declarations may drift from docs         | Consumers may see inconsistent codes                    | Subclass code attributes are covered by tests before promising code stability   |
-| Package facade may drift from module APIs           | Imports/docs can lag                                    | Review `__all__`, docs, and tests together                                      |
-| Permissive reference aliases                        | Ambiguity pressure grows with kind formats              | Prefer canonical form and apply allowlists                                      |
-| Informal pre-1.0 compatibility                      | Upgrades may break consumers                            | Define deprecation/version policy before 1.0                                    |
-| No property-based or fault-injection tests          | Rare parser and cleanup edges may escape                | Add them where risk justifies complexity                                        |
-| Architecture drift is not CI-gated                  | Documentation can become stale                          | Maintain source refs and run `archledger source changed` in review              |
+| Risk / debt                                         | Impact                                                    | Mitigation                                                                            |
+| --------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| No inter-process lock or transactional ID allocator | Concurrent scans can choose the same ID                   | Pair with exclusive create and retry downstream                                       |
+| Filesystem-dependent atomicity/fsync                | Crash behavior varies on unusual or network filesystems   | Colocate temp files and test target environments                                      |
+| Symlink changes after path validation               | Hostile writable trees can defeat confinement             | Treat base trees as trusted; consider descriptor-relative APIs for hardened use       |
+| Whole-file processing                               | Memory and latency scale with size                        | Restrict use to ledger-scale artifacts                                                |
+| YAML implicit typing                                | Scalar interpretation can surprise                        | Safe loading, timestamp-string option, minimal quoting, and downstream schemas        |
+| Error code declarations may drift from docs         | Consumers may see inconsistent codes                      | Subclass code attributes are covered by tests before promising code stability         |
+| Package facade may drift from module APIs           | Imports/docs can lag                                      | Review `__all__`, docs, and tests together                                            |
+| Permissive reference aliases                        | Ambiguity pressure grows with kind formats                | Prefer canonical form and apply allowlists                                            |
+| Informal pre-1.0 compatibility                      | Upgrades may break consumers                              | Define deprecation/version policy before 1.0                                          |
+| No property-based or fault-injection tests          | Rare parser and cleanup edges may escape                  | Add them where risk justifies complexity                                              |
+| Architecture drift is not CI-gated                  | Documentation can become stale                            | Maintain source refs and run `archledger source changed` in review                    |
+| Direct sibling roots can collide across projects    | One external store may be selected accidentally           | Require `.ledger-store` and downstream project-binding markers; fail without fallback |
+| External Git is operator-owned                      | Offline computers can diverge or allocate conflicting IDs | Pull, commit, push promptly, and resolve integration conflicts downstream             |
 
 Lack of multi-file transactions, indexing, remote access, and domain validation is an intentional boundary, not an incomplete feature list.
 

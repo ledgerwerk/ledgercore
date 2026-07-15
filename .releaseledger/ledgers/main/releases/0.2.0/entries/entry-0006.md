@@ -3,14 +3,14 @@ schema_version: 2
 object_type: release_entry
 versioning:
   schema_version: 1
-  revision: 1
+  revision: 2
 entry_id: entry-0006
 release_version: 0.2.0
 kind: added
 summary:
   interval_to_compact_duration and parse_compact_duration for human-readable
   time interval formatting
-status: accepted
+status: rejected
 audience: null
 scopes: []
 source_refs:
@@ -24,3 +24,5 @@ breaking: false
 internal: false
 order: 6
 ---
+
+Removed as a documentation error because these functions are not present in the current 0.2.0 source history.

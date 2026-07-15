@@ -103,10 +103,10 @@ from ledgercore.jsonl import (
 
 # Curated package-root layout facade.
 # Detailed layout dataclasses (PlatformRoots, LedgerMount, LedgerProjectManifest,
-# LedgerLocalConfig, LedgerRegistration, ResolvedMount, StorageProviderDefinition,
-# ToolConfigDefinition) intentionally remain under `ledgercore.layout` and must not
-# leak into the package root. `derive_checkout_id` is retained at the root for
-# 0.2.x backward compatibility.
+# LedgerLocalConfig, LedgerRegistration, ResolvedMount, ToolConfigDefinition)
+# intentionally remain under `ledgercore.layout` and must not leak into the package
+# root. `derive_checkout_id` is retained at the root for 0.2.x backward
+# compatibility.
 from ledgercore.layout import (
     ResolvedLedgerLayout,
     derive_checkout_id,

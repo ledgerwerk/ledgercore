@@ -22,7 +22,6 @@ from ledgercore.paths import resolve_relative_child, validate_relative_posix_pat
 StorageClass = Literal["repository", "workspace", "cache"]
 StorageScope = Literal["project", "checkout"]
 ConfigLocation = Literal["project", "workspace"]
-ProviderKind = Literal["user-data", "user-cache", "project-relative"]
 StorageResolutionSource = Literal[
     "repository",
     "explicit",
@@ -31,6 +30,10 @@ StorageResolutionSource = Literal[
     "local-provider",
     "manifest-default",
 ]
+
+_SIBLING_LEDGER_PROVIDER = "sibling-ledger"
+_SIBLING_LEDGER_DIRNAME = "ledger"
+_SIBLING_LEDGER_MARKER = ".ledger-store"
 
 _TOKEN_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _TOP_LEVEL_FIELDS = frozenset({"schema_version", "project", "storage", "ledgers"})
@@ -53,12 +56,11 @@ class PlatformRoots:
 
 
 @dataclass(frozen=True)
-class StorageProviderDefinition:
-    name: str
-    storage_class: StorageClass
-    kind: ProviderKind
-    root: str | None
-    marker: str | None
+class _SelectedStorageBackend:
+    root: Path
+    source: StorageResolutionSource
+    namespaced: bool
+    provider: str | None
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,6 @@ class LedgerProjectManifest:
     cache_namespace: str
     workspace_default_provider: str
     cache_default_provider: str
-    providers: Mapping[str, StorageProviderDefinition]
     ledgers: Mapping[str, LedgerRegistration]
 
 
@@ -306,10 +307,7 @@ def _parse_tool_config(value: Any, field_name: str) -> ToolConfigDefinition:
             )
         return ToolConfigDefinition(location="project", path=path, scope=None)
 
-    raise LedgerLayoutError(
-        f"{field_name}.location='workspace' is not supported until the "
-        "private-provider phase"
-    )
+    raise LedgerLayoutError(f"{field_name}.location='workspace' is not supported")
 
 
 def _parse_mount(value: Any, field_name: str, mount_name: str) -> LedgerMount:
@@ -457,7 +455,6 @@ def parse_ledger_project_manifest(document: Mapping[str, Any]) -> LedgerProjectM
         cache_namespace=cache_defaults[1],
         workspace_default_provider=workspace_defaults[0],
         cache_default_provider=cache_defaults[0],
-        providers=_freeze_mapping({}),
         ledgers=_freeze_mapping(ledgers),
     )
     _validate_owned_paths(manifest)
@@ -598,6 +595,38 @@ def _selected_checkout_id(
     return derive_checkout_id(project_root)
 
 
+def _resolve_sibling_ledger_root(project_root: Path) -> Path:
+    candidate = project_root.parent / _SIBLING_LEDGER_DIRNAME
+    root = candidate.resolve(strict=False)
+    provider = _SIBLING_LEDGER_PROVIDER
+    if not root.exists():
+        raise LedgerLayoutError(
+            f"workspace provider {provider!r} is selected, but {root!s} does not "
+            "exist. Restore or initialize the sibling store, or remove the local "
+            "provider selection. No fallback was used."
+        )
+    if not root.is_dir():
+        raise LedgerLayoutError(
+            f"workspace provider {provider!r} is selected, but {root!s} is not a "
+            "directory. Restore the sibling store or remove the local provider "
+            "selection. No fallback was used."
+        )
+    marker = root / _SIBLING_LEDGER_MARKER
+    if not marker.exists():
+        raise LedgerLayoutError(
+            f"workspace provider {provider!r} is selected, but {marker!s} is "
+            "missing. Create the store marker during explicit initialization or "
+            "remove the local provider selection. No fallback was used."
+        )
+    if not marker.is_file():
+        raise LedgerLayoutError(
+            f"workspace provider {provider!r} is selected, but {marker!s} is not "
+            "a regular file. Restore the store marker or remove the local provider "
+            "selection. No fallback was used."
+        )
+    return root
+
+
 def _selected_family_root(
     storage_class: Literal["workspace", "cache"],
     manifest: LedgerProjectManifest,
@@ -607,11 +636,13 @@ def _selected_family_root(
     explicit_root: Path | None,
     environ: Mapping[str, str],
     platform_roots: PlatformRoots,
-) -> tuple[Path, StorageResolutionSource]:
+) -> _SelectedStorageBackend:
     if explicit_root is not None:
-        return (
-            _resolve_trusted_root(explicit_root, project_root=project_root),
-            "explicit",
+        return _SelectedStorageBackend(
+            root=_resolve_trusted_root(explicit_root, project_root=project_root),
+            source="explicit",
+            namespaced=True,
+            provider=None,
         )
 
     env_var = (
@@ -619,9 +650,11 @@ def _selected_family_root(
     )
     env_root = environ.get(env_var)
     if env_root:
-        return (
-            _resolve_trusted_root(env_root, project_root=project_root),
-            "environment",
+        return _SelectedStorageBackend(
+            root=_resolve_trusted_root(env_root, project_root=project_root),
+            source="environment",
+            namespaced=True,
+            provider=None,
         )
 
     local_root = (
@@ -632,7 +665,12 @@ def _selected_family_root(
         else local_config.cache_root
     )
     if local_root is not None:
-        return (local_root, "local-root")
+        return _SelectedStorageBackend(
+            root=local_root,
+            source="local-root",
+            namespaced=True,
+            provider=None,
+        )
 
     local_provider = (
         None
@@ -642,19 +680,37 @@ def _selected_family_root(
         else local_config.cache_provider
     )
     if local_provider is not None:
+        if storage_class == "workspace" and local_provider == _SIBLING_LEDGER_PROVIDER:
+            return _SelectedStorageBackend(
+                root=_resolve_sibling_ledger_root(project_root),
+                source="local-provider",
+                namespaced=False,
+                provider=local_provider,
+            )
         raise LedgerLayoutError(
-            f"{storage_class} provider selection is not supported until the "
-            "private-provider phase"
+            f"{storage_class} provider {local_provider!r} is not supported; "
+            "only workspace provider 'sibling-ledger' is available, and it "
+            "supports direct project-scoped mounts. No fallback was used."
         )
 
     if storage_class == "workspace":
         if manifest.workspace_default_provider != "user-data":
             raise LedgerLayoutError("workspace default provider must be 'user-data'")
-        return (platform_roots.user_data.resolve(strict=False), "manifest-default")
+        return _SelectedStorageBackend(
+            root=platform_roots.user_data.resolve(strict=False),
+            source="manifest-default",
+            namespaced=True,
+            provider="user-data",
+        )
 
     if manifest.cache_default_provider != "user-cache":
         raise LedgerLayoutError("cache default provider must be 'user-cache'")
-    return (platform_roots.user_cache.resolve(strict=False), "manifest-default")
+    return _SelectedStorageBackend(
+        root=platform_roots.user_cache.resolve(strict=False),
+        source="manifest-default",
+        namespaced=True,
+        provider="user-cache",
+    )
 
 
 def _scoped_root(
@@ -695,13 +751,11 @@ def resolve_ledger_layout(
     if registration is None:
         raise LedgerLayoutError(f"unknown ledger registration: {ledger_name}")
 
-    # LAY-002: reject workspace tool config in 0.3.0. The parser already rejects
-    # it through the supported mapping path; the resolver repeats the gate so
+    # Workspace tool configuration remains unsupported in 0.4.0. The parser
+    # rejects it through the supported mapping path; repeat the gate here so
     # manually constructed manifests cannot bypass it.
     if registration.config is not None and registration.config.location == "workspace":
-        raise LedgerLayoutError(
-            "workspace tool config is not supported until the private-provider phase"
-        )
+        raise LedgerLayoutError("workspace tool config is not supported")
 
     env = os.environ if environ is None else environ
     roots = platform_roots or _default_platform_roots(manifest)
@@ -738,10 +792,9 @@ def resolve_ledger_layout(
     # LAY-001: only resolve the family roots that this registration actually
     # needs. A repository-only ledger must not require any external storage
     # config; a workspace-only ledger must not require a cache root.
-    workspace_family_root: Path | None = None
-    workspace_source: StorageResolutionSource | None = None
+    workspace_backend: _SelectedStorageBackend | None = None
     if workspace_needed:
-        workspace_family_root, workspace_source = _selected_family_root(
+        workspace_backend = _selected_family_root(
             "workspace",
             manifest,
             project_root=project_root,
@@ -750,10 +803,9 @@ def resolve_ledger_layout(
             environ=env,
             platform_roots=roots,
         )
-    cache_family_root: Path | None = None
-    cache_source: StorageResolutionSource | None = None
+    cache_backend: _SelectedStorageBackend | None = None
     if cache_needed:
-        cache_family_root, cache_source = _selected_family_root(
+        cache_backend = _selected_family_root(
             "cache",
             manifest,
             project_root=project_root,
@@ -781,21 +833,26 @@ def resolve_ledger_layout(
                     "checkout-scoped resolution requires a checkout ID"
                 )
             if mount.storage == "workspace":
-                assert workspace_family_root is not None
-                assert workspace_source is not None
-                family_root = workspace_family_root
-                source = workspace_source
+                assert workspace_backend is not None
+                backend = workspace_backend
             else:
-                assert cache_family_root is not None
-                assert cache_source is not None
-                family_root = cache_family_root
-                source = cache_source
-            scoped_root = _scoped_root(
-                family_root,
-                manifest.project_uuid,
-                mount.scope,
-                selected_checkout_id or "",
-            )
+                assert cache_backend is not None
+                backend = cache_backend
+            source = backend.source
+            if not backend.namespaced:
+                if mount.storage != "workspace" or mount.scope != "project":
+                    raise LedgerLayoutError(
+                        "workspace provider 'sibling-ledger' supports only "
+                        "project-scoped workspace mounts"
+                    )
+                scoped_root = backend.root
+            else:
+                scoped_root = _scoped_root(
+                    backend.root,
+                    manifest.project_uuid,
+                    mount.scope,
+                    selected_checkout_id or "",
+                )
             resolved_path = _resolve_layout_child(
                 scoped_root,
                 mount.path,
@@ -823,9 +880,9 @@ def resolve_ledger_layout(
             config_scope = registration.config.scope or "project"
             if config_scope == "checkout" and selected_checkout_id is None:
                 raise LedgerLayoutError("checkout-scoped config requires a checkout ID")
-            assert workspace_family_root is not None
+            assert workspace_backend is not None
             scoped_root = _scoped_root(
-                workspace_family_root,
+                workspace_backend.root,
                 manifest.project_uuid,
                 config_scope,
                 selected_checkout_id or "",
@@ -856,11 +913,9 @@ __all__ = [
     "LedgerProjectManifest",
     "LedgerRegistration",
     "PlatformRoots",
-    "ProviderKind",
     "ResolvedLedgerLayout",
     "ResolvedMount",
     "StorageClass",
-    "StorageProviderDefinition",
     "StorageResolutionSource",
     "StorageScope",
     "ToolConfigDefinition",

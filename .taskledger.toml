@@ -9,7 +9,7 @@ project_name = "ledgercore"
 # Taskledger branch-scoped state. This block is intentionally safe to commit.
 ledger_ref = "feature-ledgercore-0-2-compatibility"
 ledger_parent_ref = "main"
-ledger_next_task_number = 13
+ledger_next_task_number = 14
 ledger_branch_guard = "off"
 
 # Project-local taskledger overrides.

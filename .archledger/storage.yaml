@@ -1,5 +1,5 @@
-storage_version: 2
+storage_version: 3
 created_with_archledger: 0.3.1.dev6+g5c58990ed
 project_uuid: 565c0312-b531-4d07-aa1f-32c796f58dae
-created_at: "2026-06-13T08:41:40.811339+00:00"
+version: 1
 next_number: 13

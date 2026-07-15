@@ -30,7 +30,6 @@ DETAILED_LAYOUT_DATACLASSES = frozenset(
         "LedgerRegistration",
         "PlatformRoots",
         "ResolvedMount",
-        "StorageProviderDefinition",
         "ToolConfigDefinition",
     }
 )

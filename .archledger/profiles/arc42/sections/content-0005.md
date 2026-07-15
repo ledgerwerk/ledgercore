@@ -1,5 +1,5 @@
 ---
-schema_version: 3
+schema_version: 4
 id: content-0005
 version: 1
 kind: content
@@ -8,10 +8,7 @@ section: building_block_view
 title: Building Block View
 order: 50
 status: accepted
-date: "2026-06-13"
 body_format: markdown
-created_at: "2026-06-13T08:41:40.792531+00:00"
-updated_at: "2026-06-13T08:55:59.315690+00:00"
 source_refs:
   - path: ledgercore/__init__.py
     reason: Package module facade and building blocks

@@ -1,17 +1,14 @@
 ---
-schema_version: 3
+schema_version: 4
 id: content-0002
-version: 1
+version: 2
 kind: content
 type: section
 section: architecture_constraints
 title: Architecture Constraints
 order: 20
 status: accepted
-date: "2026-06-13"
 body_format: markdown
-created_at: "2026-06-13T08:41:40.792531+00:00"
-updated_at: "2026-06-13T11:05:13.161616+00:00"
 source_refs:
   - path: pyproject.toml
     reason: Runtime, packaging, typing, and toolchain constraints
@@ -29,12 +26,12 @@ source_refs:
 
 ## Product constraints
 
-- The package is pre-1.0 (`0.3.0`); patch releases preserve the current minor API where practical, and minor releases may intentionally evolve public APIs before 1.0 with changelog and migration guidance. The 0.3.0 release is the pilot API for the canonical Ledger-family layout.
+- The package is pre-1.0 (`0.4.0`); patch releases preserve the current minor API where practical, and minor releases may intentionally evolve public APIs before 1.0 with changelog and migration guidance. The 0.4.0 release adds one fixed built-in direct sibling workspace provider while preserving namespaced root overrides.
 - The top-level package re-exports a curated convenience API, including `__version__`. The curated root layout facade exposes `LedgerProjectLocator`, `ResolvedLedgerLayout`, `locate_ledger_project`, `parse_ledger_project_manifest`, `parse_ledger_local_config`, `resolve_ledger_layout`, and `derive_checkout_id`; detailed layout dataclasses remain under `ledgercore.layout`.
 - The canonical layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
 - Existing compatibility aliases and documented legacy reference syntax are retained.
 - Persisted formats must stay inspectable with ordinary text tools.
-- The private sibling provider phase and the external workspace configuration phase are explicitly out of scope for 0.3.0. `ledgercore` accepts provider values in the local override for migration diagnostics but rejects them in the resolver until that phase lands.
+- The machine-local provider value `sibling-ledger` is the only direct backend. It resolves project-scoped workspace mounts below `<project-root>/../ledger` and requires `.ledger-store`; arbitrary provider declarations, direct cache or checkout mounts, workspace tool configuration, and fallback are unsupported.
 
 ## Engineering constraints
 

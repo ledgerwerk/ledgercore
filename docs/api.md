@@ -231,22 +231,22 @@ module import to keep the curated facade small.
 | `LedgerLocalConfig`     | Frozen dataclass for optional machine-local overrides.                      |
 | `ResolvedMount`         | Frozen dataclass with resolved mount path, scoped root, and source.         |
 
-**Reserved for a later phase.** The following symbols exist for forward
-compatibility and migration diagnostics. They are not part of the 0.3.0
-compatibility surface and must not be relied on by downstream tools yet.
+`StorageResolutionSource` includes `"local-provider"` for the selected built-in
+`sibling-ledger` workspace backend. This is an internal resolution detail; there is
+no public provider declaration or topology type. The accepted machine-local provider
+value is `sibling-ledger`. It resolves a direct project-scoped workspace mount below
+`<project-root>/../ledger` and requires a regular `.ledger-store` marker there.
 
-| Symbol                      | Status                                                                                              |
-| --------------------------- | --------------------------------------------------------------------------------------------------- |
-| `ProviderKind`              | Reserved literal type for built-in and future provider kinds. Stable in 0.3.0 but unused.           |
-| `StorageProviderDefinition` | Reserved frozen dataclass for named provider definitions. Stable in 0.3.0 but unused.               |
-| `StorageResolutionSource`   | The `"local-provider"` value is reserved for the private-provider phase and never emitted in 0.3.0. |
+Root overrides remain namespaced and preserve the existing precedence order. The
+direct provider rejects cache selection, checkout-scoped workspace mounts, unknown
+provider names, workspace-located tool configuration, and missing or invalid sibling
+storage without fallback. Resolution is read-only. Downstream tools own marker
+initialization, project binding, migration, ID allocation, and Git behavior.
 
-**Supported construction flow.** `parse_ledger_project_manifest` and
-`parse_ledger_local_config` are the only supported ways to construct manifest
-and local-config objects. Manually built `LedgerProjectManifest` instances that
-bypass the parser (for example, with a workspace tool config) are not a
-supported input to `resolve_ledger_layout` in 0.3.0; the resolver rejects them.
-This is a deliberate gate until the private-provider phase lands.
+`parse_ledger_project_manifest` and `parse_ledger_local_config` accept mappings,
+not TOML file paths. Manually built manifests that bypass parser validation remain
+unsupported inputs when they request workspace tool configuration; the resolver rejects
+that configuration explicitly.
 SM:
 
 ## `ledgercore.path_text`

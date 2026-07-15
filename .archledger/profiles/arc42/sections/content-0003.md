@@ -1,17 +1,14 @@
 ---
-schema_version: 3
+schema_version: 4
 id: content-0003
-version: 1
+version: 2
 kind: content
 type: section
 section: context_and_scope
 title: Context and Scope
 order: 30
 status: accepted
-date: "2026-06-13"
 body_format: markdown
-created_at: "2026-06-13T08:41:40.792531+00:00"
-updated_at: "2026-06-13T08:55:58.317204+00:00"
 source_refs:
   - path: ledgercore/__init__.py
     reason: Public integration boundary
@@ -36,14 +33,14 @@ Local filesystem
 
 ## External interfaces
 
-| Interface            | Contract                                                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions                                   |
-| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, and front-matter documents; `.ledger/` layouts; atomic replacement where requested |
-| PyYAML               | Safe YAML loading and dumping                                                                                     |
-| platformdirs         | OS-correct user data and cache roots for the built-in layout providers                                            |
-| Environment variable | Optional caller-selected variables can disable fsync or override workspace/cache roots and checkout identity      |
-| Clock                | Current time is rendered at second precision with a `Z` suffix                                                    |
+| Interface            | Contract                                                                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions                                                                 |
+| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, and front-matter documents; `.ledger/` layouts; direct sibling store markers; atomic replacement where requested |
+| PyYAML               | Safe YAML loading and dumping                                                                                                                   |
+| platformdirs         | OS-correct user data and cache roots for the built-in layout providers                                                                          |
+| Environment variable | Optional caller-selected variables can disable fsync or override workspace/cache roots and checkout identity                                    |
+| Clock                | Current time is rendered at second precision with a `Z` suffix                                                                                  |
 
 ## Inside the boundary
 
@@ -63,7 +60,7 @@ Local filesystem
 - TOML parsing, migration commands, and layout-writing workflows
 - Multi-file consistency, recovery journals, and inter-process locking
 - Filesystem permissions and trust policy
-- UI, observability, configuration parsing, and network access
+- UI, observability, configuration parsing, Git synchronization, and network access
 - Choice of ledger codes, kinds, and relation semantics
 
 The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state and performs no writes during layout discovery or resolution.

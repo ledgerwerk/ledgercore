@@ -251,14 +251,11 @@ not authorize filesystem access. It supports `"basic"`, `"wide"`, and
 
 ## Ledger project layout
 
-`ledgercore` 0.3.0 introduces a canonical Ledger-family project layout
-centered on `.ledger/ledger.toml`. Projects that follow this layout share one
-canonical manifest, one normalized project UUID, and a fixed repository,
-workspace, and cache topology. `ledgercore` parses mappings only: downstream
-tools remain responsible for TOML loading, migration workflows, and any CLI
-behavior. The 0.3.0 release supports project-local tool config only; private
-sibling providers and external workspace configuration are reserved for a
-later phase and are not part of the 0.3.0 compatibility surface.
+`ledgercore` 0.4.0 provides the canonical Ledger-family project layout plus one
+fixed built-in `sibling-ledger` workspace provider. `ledgercore` parses mappings
+only: downstream tools remain responsible for TOML loading, marker initialization,
+migration workflows, and any CLI behavior. Tool configuration remains project-local
+at `.ledger/task/config.toml`; the selected external data root is machine-local.
 
 ```python
 from pathlib import Path
@@ -280,7 +277,11 @@ if locator is not None and not locator.is_legacy:
                 "taskledger": {
                     "config": {"location": "project", "path": "task/config.toml"},
                     "mounts": {
-                        "data": {"storage": "workspace", "path": "task/data"},
+                        "data": {
+                            "storage": "workspace",
+                            "scope": "project",
+                            "path": "task/taskledger",
+                        },
                         "records": {"storage": "repository", "path": "task/records"},
                     },
                 }
@@ -300,14 +301,31 @@ if locator is not None and not locator.is_legacy:
     records_dir = layout.mounts["records"].path
 ```
 
-Repository mounts resolve beneath `.ledger/`; workspace and cache mounts resolve
-under `projects/<project-uuid>/project` or
-`projects/<project-uuid>/checkouts/<checkout-id>` depending on scope.
+Repository mounts resolve beneath `.ledger/`. Normal workspace and cache roots use
+`projects/<project-uuid>/project` or
+`projects/<project-uuid>/checkouts/<checkout-id>` depending on scope. To select the
+flat sibling convention, create `.ledger/ledger.local.toml` with:
 
-Migration to the canonical layout is downstream-owned and explicit. Each
-Ledger-family tool decides its own migration policy, the canonical UUID it
-will adopt, and how it handles legacy data. `ledgercore` 0.3.0 ships
-discovery and resolution only and performs no automatic migration.
+```toml
+[storage.workspace]
+provider = "sibling-ledger"
+```
+
+The provider resolves `<project-root>/../ledger` and requires the regular marker
+`../ledger/.ledger-store`. With the project mount above, the effective Taskledger
+data path is `../ledger/task/taskledger`. The selected root must already exist,
+missing storage is fatal, no fallback occurs, and `ledgercore` does not invoke Git.
+A separately version-controlled workspace is supported. Taskledger owns project
+binding, authoritative ID allocation, migration, and synchronization.
+
+On another computer, clone or otherwise provision the external store as the sibling
+`../ledger`, ensure `.ledger-store` is a regular file, then use the same local provider
+selection. Ledgercore validates the selected root but does not perform Git operations.
+Taskledger must bind the direct mount to the project before use and derive the next
+numeric task ID from validated active, archived, and tombstone records. It must not
+persist a redundant next-task counter. Disconnected computers can choose the same
+numeric ID, so pull before creating tasks, commit and push promptly, and resolve Git
+conflicts explicitly.
 
 ## Shared ledger config convention
 
@@ -421,7 +439,7 @@ python -m sphinx -W -b html docs docs/_build/html
 Versions are derived from VCS tags; there is no static version in
 `pyproject.toml` to update.
 
-1. Update `CHANGELOG.md` and create or sign the target tag, such as `v0.3.0`.
+1. Update `CHANGELOG.md` and create or sign the target tag, such as `v0.4.0`.
 2. Run the test, coverage, lint, formatting, typing, example, and docs gates in
    [`docs/release.md`](docs/release.md).
 3. Run `python -m build` and `python -m twine check dist/*`.
@@ -438,9 +456,8 @@ SETUPTOOLS_SCM_PRETEND_VERSION=X.Y.Z python -m build
 
 `ledgercore` is pre-1.0. Patch releases preserve the current minor API where
 practical. Minor releases may intentionally evolve public APIs before 1.0,
-with changelog and migration guidance. The 0.3.0 release is the pilot API for
-the canonical Ledger-family layout; downstream tools that adopt the 0.3.x
-series should pin `ledgercore>=0.3.0,<0.4.0` during the pilot window.
+with changelog and migration guidance. The 0.4.0 release adds the fixed
+sibling-ledger workspace convention while preserving namespaced root overrides.
 
 ## License
 

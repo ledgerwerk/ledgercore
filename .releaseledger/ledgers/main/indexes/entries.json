@@ -7,6 +7,20 @@
     "kind": "added",
     "order": 1,
     "record_revision": 1,
+    "release_version": "0.4.0",
+    "scopes": [],
+    "source_refs": [],
+    "status": "accepted",
+    "summary": "Added the fixed sibling-ledger workspace provider for direct project-scoped external storage"
+  },
+  {
+    "audience": null,
+    "breaking": false,
+    "entry_id": "entry-0001",
+    "internal": false,
+    "kind": "added",
+    "order": 1,
+    "record_revision": 1,
     "release_version": "0.1.0",
     "scopes": [],
     "source_refs": ["git:d7d8b755ed5350a318d7fa0c8a526fa90892fb49"],
@@ -41,6 +55,20 @@
     "sources": ["git:2aa45ae21bc532caa37f2bf7d2b60735d211c613"],
     "status": "accepted",
     "summary": "Changed core storage and validation behavior for atomic writes, front matter, IDs, and source-tree versions"
+  },
+  {
+    "audience": null,
+    "breaking": false,
+    "entry_id": "entry-0002",
+    "internal": false,
+    "kind": "added",
+    "order": 2,
+    "record_revision": 1,
+    "release_version": "0.4.0",
+    "scopes": [],
+    "source_refs": [],
+    "status": "accepted",
+    "summary": "Added .ledger-store validation and fatal no-fallback errors for selected sibling storage"
   },
   {
     "audience": null,
@@ -90,6 +118,20 @@
     "breaking": false,
     "entry_id": "entry-0003",
     "internal": false,
+    "kind": "changed",
+    "order": 3,
+    "record_revision": 2,
+    "release_version": "0.4.0",
+    "scopes": [],
+    "source_refs": [],
+    "status": "accepted",
+    "summary": "Changed root overrides to remain namespaced and removed unused provisional provider-definition abstractions"
+  },
+  {
+    "audience": null,
+    "breaking": false,
+    "entry_id": "entry-0003",
+    "internal": false,
     "kind": "added",
     "order": 3,
     "record_revision": 1,
@@ -133,6 +175,20 @@
     ],
     "status": "accepted",
     "summary": "Documented Sphinx builds with MyST Markdown and myst-parser dependencies"
+  },
+  {
+    "audience": null,
+    "breaking": false,
+    "entry_id": "entry-0004",
+    "internal": false,
+    "kind": "docs",
+    "order": 4,
+    "record_revision": 1,
+    "release_version": "0.4.0",
+    "scopes": [],
+    "source_refs": [],
+    "status": "accepted",
+    "summary": "Documented external Git-backed workspace operation, provider activation, and downstream ID ownership"
   },
   {
     "audience": null,
@@ -241,11 +297,11 @@
     "internal": false,
     "kind": "added",
     "order": 6,
-    "record_revision": 1,
+    "record_revision": 2,
     "release_version": "0.2.0",
     "scopes": [],
     "source_refs": ["git:bfd7b25e910e9959392128a57ec469641dc5f158"],
-    "status": "accepted",
+    "status": "rejected",
     "summary": "interval_to_compact_duration and parse_compact_duration for human-readable time interval formatting"
   },
   {

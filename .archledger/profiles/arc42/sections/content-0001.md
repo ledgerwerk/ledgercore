@@ -1,17 +1,14 @@
 ---
-schema_version: 3
+schema_version: 4
 id: content-0001
-version: 1
+version: 2
 kind: content
 type: section
 section: introduction_and_goals
 title: Introduction and Goals
 order: 10
 status: accepted
-date: "2026-06-13"
 body_format: markdown
-created_at: "2026-06-13T08:41:40.792531+00:00"
-updated_at: "2026-06-13T08:55:57.283405+00:00"
 source_refs:
   - path: README.md
     reason: Purpose, goals, public scope, and non-goals
@@ -59,5 +56,5 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Remote storage, synchronization, indexing, querying, or database abstraction
 - TOML file parsing, migration orchestration, or a Ledger-family CLI
 - CLI error rendering or exit-code policy
-- Private sibling storage providers, external workspace configuration, and the `platformdirs` `project-relative` provider. These are reserved for a later release phase.
+- Generic provider declarations, direct cache or checkout providers, workspace tool configuration, and external Git synchronization. The 0.4.0 layout surface supports one explicitly selected built-in direct sibling workspace provider.
 - Automated layout migration. Migration to the canonical layout is downstream-owned and explicit.

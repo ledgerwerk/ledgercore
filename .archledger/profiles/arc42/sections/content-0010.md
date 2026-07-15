@@ -1,5 +1,5 @@
 ---
-schema_version: 3
+schema_version: 4
 id: content-0010
 version: 1
 kind: content
@@ -8,10 +8,7 @@ section: quality_requirements
 title: Quality Requirements
 order: 100
 status: accepted
-date: "2026-06-13"
 body_format: markdown
-created_at: "2026-06-13T08:41:40.792531+00:00"
-updated_at: "2026-06-13T08:56:01.900444+00:00"
 source_refs:
   - path: tests
     reason: Behavioral quality scenarios and regression coverage

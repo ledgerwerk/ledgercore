@@ -250,17 +250,12 @@ parent directory, applying the same safety checks.
 
 ### Canonical project layout resolution
 
-`ledgercore` 0.3.0 resolves a common `.ledger/ledger.toml` topology through
+`ledgercore` 0.4.0 resolves a common `.ledger/ledger.toml` topology through
 `ledgercore.layout`. The layout is described by a schema-version-2 project
-manifest, an optional machine-local override mapping, and an explicit
-checkout ID.
-
-In 0.3.0 only project-local tool config is accepted (`config.location == "project"`). Private sibling providers and external workspace config
-(`config.location == "workspace"`) are reserved for a later release and are
-not part of the 0.3.0 compatibility surface. Layout resolution only evaluates
-the family roots (workspace, cache) that the selected registration actually
-uses; repository-only ledgers do not require any external storage config to
-resolve.
+manifest, an optional machine-local override mapping, and an explicit checkout ID.
+Tool configuration remains project-local (`config.location == "project"`). The
+resolver evaluates only the workspace and cache families used by the selected
+registration, so repository-only ledgers do not require external storage config.
 
 ```python
 from pathlib import Path
@@ -281,7 +276,11 @@ if locator is not None and not locator.is_legacy:
             "ledgers": {
                 "taskledger": {
                     "mounts": {
-                        "data": {"storage": "workspace", "path": "task/data"},
+                        "data": {
+                            "storage": "workspace",
+                            "scope": "project",
+                            "path": "task/taskledger",
+                        },
                         "records": {"storage": "repository", "path": "task/records"},
                     },
                 }
@@ -362,7 +361,11 @@ manifest = parse_ledger_project_manifest(
                 "config": {"location": "project", "path": "task/config.toml"},
                 "mounts": {
                     "records": {"storage": "repository", "path": "task/records"},
-                    "data": {"storage": "workspace", "path": "task/data"},
+                    "data": {
+                        "storage": "workspace",
+                        "scope": "project",
+                        "path": "task/taskledger",
+                    },
                     "indexes": {"storage": "cache", "path": "task/indexes"},
                 },
             }
@@ -380,6 +383,41 @@ layout = resolve_ledger_layout(
 )
 ```
 
+#### Built-in sibling-ledger provider
+
+The machine-local selection below opts into the one fixed direct workspace backend:
+
+```toml
+# .ledger/ledger.local.toml
+schema_version = 1
+
+[storage.workspace]
+provider = "sibling-ledger"
+```
+
+For a project root `/work/ledgercore`, the provider root is fixed at
+`/work/ledger`. It requires an existing directory and a regular
+`/work/ledger/.ledger-store` marker. Resolution never creates either path, invokes
+Git, or falls back to the platform data root. Missing or invalid selected storage
+is a fatal error with remediation in the exception text.
+
+A project-scoped workspace mount resolves directly below the provider root:
+
+```text
+<project-root>/../ledger/task/taskledger
+```
+
+Root overrides retain the existing namespaced behavior instead:
+
+```text
+root = "../ledger"
+../ledger/projects/<project-uuid>/project/task/taskledger
+```
+
+The direct provider supports workspace/project mounts only. It does not support
+cache selection, checkout-scoped mounts, provider declarations, configurable
+markers, or workspace-located tool configuration.
+
 #### Named mounts and lifecycle rules
 
 - A mount is identified by name within one ledger registration. Two ledgers
@@ -388,30 +426,44 @@ layout = resolve_ledger_layout(
 - Repository mounts resolve beneath `.ledger/` and cannot be redirected.
   They live with the source tree and are intended for durable, in-tree
   records.
-- Workspace mounts resolve under `projects/<project-uuid>/...` outside the
-  source checkout. They are intended for operational state that must
-  survive across checkouts or hosts.
-- Cache mounts resolve under the same `projects/<project-uuid>/...` roots
-  but are explicitly rebuildable. Deleting a cache mount is safe.
-- The `config` block (when present) must point to a project-local file
-  beneath `.ledger/`. Workspace-stored tool config is reserved for the
-  later private-provider phase.
+- Workspace mounts normally resolve under `projects/<project-uuid>/...` outside
+  the source checkout. The selected `sibling-ledger` provider is the fixed
+  exception and resolves direct project-scoped mounts below `<project-root>/../ledger`.
+- Cache mounts resolve under the same `projects/<project-uuid>/...` roots but are
+  explicitly rebuildable. Deleting a cache mount is safe.
+- The `config` block (when present) must point to a project-local file beneath
+  `.ledger/`. Workspace-stored tool config is unsupported.
 
 #### Local roots vs provider selections
 
-`ledgercore` 0.3.0 distinguishes two local override fields:
+`ledgercore` distinguishes two local override fields:
 
-- `workspace_root` / `cache_root` are explicit local filesystem roots. They
-  redirect the matching family root without changing the provider.
-- `workspace_provider` / `cache_provider` select a named provider such as
-  `private-sibling`. In 0.3.0 the parser accepts these values to support
-  migration diagnostics, but the resolver rejects any non-default provider
-  selection. Reserve provider selections for a later release.
+- `workspace_root` / `cache_root` are explicit local filesystem roots. They redirect
+  the matching family root while retaining namespaced project and checkout paths.
+- `workspace_provider` selects the fixed built-in `sibling-ledger` convention. It is
+  valid only for workspace/project mounts and has no fallback.
+- `cache_provider` selections are rejected. Root and provider cannot be combined.
 
 `parse_ledger_project_manifest` and `parse_ledger_local_config` accept mappings,
-not TOML file paths. Repository mounts stay beneath `.ledger/`; workspace and
-cache mounts resolve under fixed `projects/<uuid>/project` or
+not TOML file paths. Repository mounts stay beneath `.ledger`; root overrides for
+workspace and cache mounts retain the fixed `projects/<uuid>/project` or
 `projects/<uuid>/checkouts/<checkout-id>` structural roots.
+
+#### External store bootstrap and downstream IDs
+
+On a second computer, clone or provision the external store as the sibling `../ledger`
+before resolving the project. Create or verify the regular `../ledger/.ledger-store`
+marker, select `provider = "sibling-ledger"` in the machine-local config, and let the
+downstream tool initialize its project-binding marker. Ledgercore only validates these
+prerequisites. It does not clone, commit, push, or otherwise invoke Git.
+
+Taskledger owns the binding file and authoritative record policy. It must derive the
+next ID as the maximum validated allocated task number plus one across active records,
+archives, and tombstones. Gaps are not reused, and the stable project config does not
+store a next-task counter. Exclusive creation with bounded retry handles local races.
+Disconnected computers can still allocate the same numeric ID, so operators should
+pull or rebase first, create and push promptly, and resolve integration conflicts
+without silently renumbering referenced tasks.
 
 For arbitrary resolved paths, use `ensure_inside_base` before access and
 `relative_to_base` when storing a POSIX relative path. `resolve_under_base`

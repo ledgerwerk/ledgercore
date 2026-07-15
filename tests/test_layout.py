@@ -62,6 +62,28 @@ def _manifest_document() -> dict[str, object]:
     }
 
 
+def _project_workspace_manifest_document() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "project": {
+            "uuid": "565C0312-B531-4D07-AA1F-32C796F58DAE",
+            "name": "ledgercore",
+        },
+        "ledgers": {
+            "taskledger": {
+                "config": {"location": "project", "path": "task/config.toml"},
+                "mounts": {
+                    "data": {
+                        "storage": "workspace",
+                        "scope": "project",
+                        "path": "task/taskledger",
+                    }
+                },
+            }
+        },
+    }
+
+
 class TestParseLedgerProjectManifest:
     def test_parses_minimal_valid_manifest(self) -> None:
         manifest = parse_ledger_project_manifest(
@@ -191,8 +213,10 @@ class TestParseLedgerProjectManifest:
                 }
             )
 
-    def test_rejects_workspace_tool_config_until_private_provider_phase(self) -> None:
-        with pytest.raises(LedgerLayoutError, match="private-provider phase"):
+    def test_rejects_workspace_tool_config(self) -> None:
+        with pytest.raises(
+            LedgerLayoutError, match="location='workspace' is not supported"
+        ):
             parse_ledger_project_manifest(
                 {
                     "schema_version": 2,
@@ -338,12 +362,12 @@ class TestParseLedgerLocalConfig:
         local = parse_ledger_local_config(
             {
                 "checkout": {"id": "ledgercore-main"},
-                "storage": {"workspace": {"provider": "private-sibling"}},
+                "storage": {"workspace": {"provider": "sibling-ledger"}},
             },
             project_root=tmp_path,
         )
         assert local.checkout_id == "ledgercore-main"
-        assert local.workspace_provider == "private-sibling"
+        assert local.workspace_provider == "sibling-ledger"
 
         with pytest.raises(LedgerLayoutError, match="checkout.id"):
             parse_ledger_local_config(
@@ -458,6 +482,144 @@ class TestResolveLedgerLayout:
             layout.tool_config_path
             == (project_root / ".ledger" / "task" / "config.toml").resolve()
         )
+
+    def test_sibling_ledger_resolves_direct_project_mount(self, tmp_path: Path) -> None:
+        project_root = tmp_path / "ledgercore"
+        (project_root / ".ledger").mkdir(parents=True)
+        sibling_root = tmp_path / "ledger"
+        sibling_root.mkdir()
+        (sibling_root / ".ledger-store").touch()
+        locator = _canonical_locator(project_root)
+        manifest = parse_ledger_project_manifest(_project_workspace_manifest_document())
+        local = parse_ledger_local_config(
+            {"storage": {"workspace": {"provider": "sibling-ledger"}}},
+            project_root=project_root,
+        )
+
+        layout = resolve_ledger_layout(
+            locator,
+            manifest,
+            "taskledger",
+            local_config=local,
+            platform_roots=PlatformRoots(
+                tmp_path / "platform-data", tmp_path / "platform-cache"
+            ),
+        )
+
+        assert layout.mounts["data"].source == "local-provider"
+        assert layout.mounts["data"].scoped_root == sibling_root.resolve()
+        assert (
+            layout.mounts["data"].path
+            == (sibling_root / "task" / "taskledger").resolve()
+        )
+        assert layout.checkout_id is None
+        assert not layout.mounts["data"].path.exists()
+
+    @pytest.mark.parametrize(
+        "failure", ["missing-root", "root-file", "missing-marker", "marker-directory"]
+    )
+    def test_sibling_ledger_requires_store_prerequisites(
+        self, tmp_path: Path, failure: str
+    ) -> None:
+        project_root = tmp_path / "ledgercore"
+        (project_root / ".ledger").mkdir(parents=True)
+        sibling_root = tmp_path / "ledger"
+        if failure == "root-file":
+            sibling_root.write_text("not a directory", encoding="utf-8")
+        elif failure != "missing-root":
+            sibling_root.mkdir()
+            marker = sibling_root / ".ledger-store"
+            if failure == "marker-directory":
+                marker.mkdir()
+
+        locator = _canonical_locator(project_root)
+        manifest = parse_ledger_project_manifest(_project_workspace_manifest_document())
+        local = LedgerLocalConfig(
+            schema_version=1,
+            workspace_root=None,
+            cache_root=None,
+            workspace_provider="sibling-ledger",
+            cache_provider=None,
+            checkout_id=None,
+        )
+
+        with pytest.raises(LedgerLayoutError, match="No fallback was used"):
+            resolve_ledger_layout(
+                locator,
+                manifest,
+                "taskledger",
+                local_config=local,
+                platform_roots=PlatformRoots(
+                    tmp_path / "platform-data", tmp_path / "platform-cache"
+                ),
+            )
+        assert not (tmp_path / "platform-data").exists()
+
+    def test_sibling_ledger_rejects_checkout_scope(self, tmp_path: Path) -> None:
+        project_root = tmp_path / "ledgercore"
+        (project_root / ".ledger").mkdir(parents=True)
+        sibling_root = tmp_path / "ledger"
+        sibling_root.mkdir()
+        (sibling_root / ".ledger-store").touch()
+        locator = _canonical_locator(project_root)
+        manifest = parse_ledger_project_manifest(
+            {
+                "schema_version": 2,
+                "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
+                "ledgers": {
+                    "taskledger": {
+                        "mounts": {
+                            "data": {
+                                "storage": "workspace",
+                                "scope": "checkout",
+                                "path": "task/taskledger",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+        local = LedgerLocalConfig(
+            schema_version=1,
+            workspace_root=None,
+            cache_root=None,
+            workspace_provider="sibling-ledger",
+            cache_provider=None,
+            checkout_id=None,
+        )
+
+        with pytest.raises(
+            LedgerLayoutError,
+            match="supports only project-scoped workspace mounts",
+        ):
+            resolve_ledger_layout(
+                locator,
+                manifest,
+                "taskledger",
+                local_config=local,
+            )
+
+    def test_sibling_ledger_is_not_a_cache_provider(self, tmp_path: Path) -> None:
+        project_root = tmp_path / "ledgercore"
+        (project_root / ".ledger").mkdir(parents=True)
+        locator = _canonical_locator(project_root)
+        manifest = parse_ledger_project_manifest(_manifest_document())
+        local = LedgerLocalConfig(
+            schema_version=1,
+            workspace_root=None,
+            cache_root=None,
+            workspace_provider=None,
+            cache_provider="sibling-ledger",
+            checkout_id=None,
+        )
+
+        with pytest.raises(LedgerLayoutError, match="cache provider"):
+            resolve_ledger_layout(
+                locator,
+                manifest,
+                "taskledger",
+                local_config=local,
+            )
 
     def test_checkout_scope_uses_precedence(self, tmp_path: Path) -> None:
         project_root = tmp_path / "project"
@@ -604,7 +766,6 @@ class TestResolveLedgerLayout:
             cache_namespace="ledgerwerk",
             workspace_default_provider="user-data",
             cache_default_provider="user-cache",
-            providers=MappingProxyType({}),
             ledgers=MappingProxyType(
                 {
                     "taskledger": LedgerRegistration(
@@ -649,7 +810,7 @@ class TestResolveLedgerLayout:
         # the same gate from the supported mapping path.
         with pytest.raises(
             LedgerLayoutError,
-            match="not supported until the private-provider phase",
+            match="location='workspace' is not supported",
         ):
             parse_ledger_project_manifest(
                 {
@@ -727,7 +888,7 @@ class TestResolveLedgerLayout:
             cache_provider=None,
             checkout_id=None,
         )
-        with pytest.raises(LedgerLayoutError, match="private-provider phase"):
+        with pytest.raises(LedgerLayoutError, match="No fallback was used"):
             resolve_ledger_layout(
                 locator,
                 manifest,
