@@ -240,10 +240,17 @@ def _parse_config_location(value: Any, field_name: str) -> ConfigLocation:
 
 
 def _resolve_trusted_root(value: Path | str, *, project_root: Path) -> Path:
-    # os.path.expanduser is used (not Path.expanduser) so that the HOME
-    # environment variable is honored on Windows, where Path.expanduser
-    # only consults USERPROFILE / HOMEDRIVE / HOMEPATH.
-    path = Path(os.path.expanduser(os.fspath(value)))
+    raw = os.fspath(value)
+    # $HOME is consulted explicitly so that local configs can target a
+    # user-chosen directory on every platform. On Windows, neither
+    # os.path.expanduser nor Path.expanduser honors $HOME; they only look at
+    # USERPROFILE / HOMEDRIVE / HOMEPATH and would silently fall back to the
+    # runner's user profile otherwise.
+    if raw.startswith("~"):
+        home = os.environ.get("HOME")
+        if home and (raw == "~" or raw[1] in ("/", "\\")):
+            raw = home if raw == "~" else os.path.join(home, raw[2:])
+    path = Path(os.path.expanduser(raw))
     if not path.is_absolute():
         path = project_root / path
     return path.resolve(strict=False)
