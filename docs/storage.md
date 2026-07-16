@@ -401,17 +401,25 @@ For a project root `/work/ledgercore`, the provider root is fixed at
 Git, or falls back to the platform data root. Missing or invalid selected storage
 is a fatal error with remediation in the exception text.
 
-A project-scoped workspace mount resolves directly below the provider root:
+A project-scoped workspace mount resolves directly below the provider root. The
+relative mount path is owned by the registered ledger, so multiple ledgers can
+share one sibling base without sharing storage:
 
 ```text
-<project-root>/../ledger/task/taskledger
+<project-root>/../ledger/<ledger-name>/<project-uuid>
+```
+
+For example, Taskledger can register `taskledger` and resolve:
+
+```text
+<project-root>/../ledger/taskledger/<project-uuid>
 ```
 
 Root overrides retain the existing namespaced behavior instead:
 
 ```text
 root = "../ledger"
-../ledger/projects/<project-uuid>/project/task/taskledger
+../ledger/projects/<project-uuid>/project/<ledger-name>
 ```
 
 The direct provider supports workspace/project mounts only. It does not support
@@ -422,7 +430,8 @@ markers, or workspace-located tool configuration.
 
 - A mount is identified by name within one ledger registration. Two ledgers
   in the same project may reuse the same mount name; they do not share
-  storage.
+  storage. Each registered ledger may use its own direct ledger-name directory,
+  and all registrations for one source project reuse the project UUID.
 - Repository mounts resolve beneath `.ledger/` and cannot be redirected.
   They live with the source tree and are intended for durable, in-tree
   records.

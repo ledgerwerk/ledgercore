@@ -76,7 +76,7 @@ def _project_workspace_manifest_document() -> dict[str, object]:
                     "data": {
                         "storage": "workspace",
                         "scope": "project",
-                        "path": "task/taskledger",
+                        "path": "taskledger",
                     }
                 },
             }
@@ -508,12 +508,71 @@ class TestResolveLedgerLayout:
 
         assert layout.mounts["data"].source == "local-provider"
         assert layout.mounts["data"].scoped_root == sibling_root.resolve()
-        assert (
-            layout.mounts["data"].path
-            == (sibling_root / "task" / "taskledger").resolve()
-        )
+        assert layout.mounts["data"].path == (sibling_root / "taskledger").resolve()
         assert layout.checkout_id is None
         assert not layout.mounts["data"].path.exists()
+
+    def test_sibling_ledger_resolves_multiple_direct_ledger_paths(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "ledgercore"
+        (project_root / ".ledger").mkdir(parents=True)
+        sibling_root = tmp_path / "ledger"
+        sibling_root.mkdir()
+        (sibling_root / ".ledger-store").touch()
+        locator = _canonical_locator(project_root)
+        project_uuid = "565c0312-b531-4d07-aa1f-32c796f58dae"
+        manifest = parse_ledger_project_manifest(
+            {
+                "schema_version": 2,
+                "project": {"uuid": project_uuid},
+                "ledgers": {
+                    "taskledger": {
+                        "mounts": {
+                            "data": {
+                                "storage": "workspace",
+                                "scope": "project",
+                                "path": f"taskledger/{project_uuid}",
+                            }
+                        }
+                    },
+                    "planledger": {
+                        "mounts": {
+                            "data": {
+                                "storage": "workspace",
+                                "scope": "project",
+                                "path": f"planledger/{project_uuid}",
+                            }
+                        }
+                    },
+                },
+            }
+        )
+        local = LedgerLocalConfig(
+            schema_version=1,
+            workspace_root=None,
+            cache_root=None,
+            workspace_provider="sibling-ledger",
+            cache_provider=None,
+            checkout_id=None,
+        )
+        roots = PlatformRoots(tmp_path / "platform-data", tmp_path / "platform-cache")
+
+        task_layout = resolve_ledger_layout(
+            locator, manifest, "taskledger", local_config=local, platform_roots=roots
+        )
+        plan_layout = resolve_ledger_layout(
+            locator, manifest, "planledger", local_config=local, platform_roots=roots
+        )
+
+        assert (
+            task_layout.mounts["data"].path
+            == sibling_root / "taskledger" / project_uuid
+        )
+        assert (
+            plan_layout.mounts["data"].path
+            == sibling_root / "planledger" / project_uuid
+        )
 
     @pytest.mark.parametrize(
         "failure", ["missing-root", "root-file", "missing-marker", "marker-directory"]
@@ -572,7 +631,7 @@ class TestResolveLedgerLayout:
                             "data": {
                                 "storage": "workspace",
                                 "scope": "checkout",
-                                "path": "task/taskledger",
+                                "path": "taskledger",
                             }
                         }
                     }
