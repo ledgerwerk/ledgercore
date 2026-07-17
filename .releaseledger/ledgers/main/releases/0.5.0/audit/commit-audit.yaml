@@ -1,0 +1,107 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.5.0
+git_base_ref: v0.4.0
+git_base_sha: 5739bea2ee3b1719a6666ec7166921ca3c2c2738
+git_head_ref: HEAD
+git_head_sha: df962e97093e350b65593a4d3de89b0acb6aa263
+git_range: 5739bea2ee3b1719a6666ec7166921ca3c2c2738..df962e97093e350b65593a4d3de89b0acb6aa263
+commit_count: 2
+rows:
+  - sha: 9c1bf72cbf5dcb8985441cf396e4b71131de5aca
+    source_ref: git:9c1bf72cbf5dcb8985441cf396e4b71131de5aca
+    short_sha: 9c1bf72
+    changed_paths:
+      - docs/storage.md
+      - tests/test_layout.py
+    stats:
+      files_changed: 0
+      insertions: 78
+      deletions: 10
+    inspected: true
+    inspected_paths:
+      - docs/storage.md
+      - tests/test_layout.py
+    observed_behavior:
+      "Documentation and test updates: refines the sibling-ledger mount
+      path description so each registered ledger owns its own <ledger-name>/<project-uuid>
+      directory under the sibling root, and extends tests to cover multiple direct ledger
+      paths."
+    public_impact: docs
+    decision: accepted
+    evidence_subject: "doc: update storage doc"
+    target_entry_id: entry-0003
+  - sha: df962e97093e350b65593a4d3de89b0acb6aa263
+    source_ref: git:df962e97093e350b65593a4d3de89b0acb6aa263
+    short_sha: df962e9
+    changed_paths:
+      - .archledger/profiles/arc42/sections/content-0001.md
+      - .archledger/profiles/arc42/sections/content-0002.md
+      - .archledger/profiles/arc42/sections/content-0003.md
+      - .archledger/profiles/arc42/sections/content-0004.md
+      - .archledger/profiles/arc42/sections/content-0006.md
+      - ARCHITECTURE.md
+      - README.md
+      - docs/api.md
+      - docs/storage.md
+      - examples/storage.py
+      - ledgercore/__init__.py
+      - ledgercore/errors.py
+      - ledgercore/layout.py
+      - ledgercore/manifest.py
+      - ledgercore/migration.py
+      - ledgercore/overrides.py
+      - ledgercore/storage_binding.py
+      - ledgercore/storage_paths.py
+      - ledgercore/tomlio.py
+      - pyproject.toml
+      - tests/test_layout.py
+      - tests/test_manifest_v3.py
+      - tests/test_migration.py
+      - tests/test_overrides.py
+      - tests/test_storage_binding.py
+      - tests/test_storage_paths.py
+      - tests/test_tomlio.py
+    stats:
+      files_changed: 0
+      insertions: 2640
+      deletions: 731
+    inspected: true
+    inspected_paths:
+      - ledgercore/errors.py
+      - ledgercore/manifest.py
+      - ledgercore/overrides.py
+      - ledgercore/tomlio.py
+      - ledgercore/storage_paths.py
+      - ledgercore/storage_binding.py
+      - ledgercore/migration.py
+      - ledgercore/layout.py
+      - ledgercore/__init__.py
+      - pyproject.toml
+      - README.md
+      - docs/storage.md
+      - docs/api.md
+      - ARCHITECTURE.md
+      - examples/storage.py
+      - tests/test_manifest_v3.py
+      - tests/test_migration.py
+      - tests/test_overrides.py
+      - tests/test_storage_binding.py
+      - tests/test_storage_paths.py
+      - tests/test_tomlio.py
+    observed_behavior:
+      "Replaces the schema-2 provider/workspace/path/scope model with
+      schema-3 storage. New modules: errors, manifest (v3 parser and overlay), overrides,
+      tomlio (round-trip TOML ownership), storage_paths (pure path formulas), storage_binding
+      (.ledger-project.toml markers), and migration (planned, verified, journaled storage
+      migration with planning and execution APIs). Tool config is fixed at .ledger/<tool>/config.toml;
+      mount paths are derived from project UUID, tool name, mount name, storage kind,
+      and checkout identity. Adds tomlkit dependency. Schema 2 remains readable for
+      migration with a deprecation warning."
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: new simplified storage system"
+    target_entry_id: entry-0002

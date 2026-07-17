@@ -59,6 +59,20 @@
   {
     "audience": null,
     "breaking": false,
+    "entry_id": "entry-0001",
+    "internal": false,
+    "kind": "added",
+    "order": 1,
+    "record_revision": 2,
+    "release_version": "0.5.0",
+    "scopes": [],
+    "source_refs": [],
+    "status": "rejected",
+    "summary": "Test entry"
+  },
+  {
+    "audience": null,
+    "breaking": false,
     "entry_id": "entry-0002",
     "internal": false,
     "kind": "added",
@@ -112,6 +126,21 @@
     "sources": ["git:4b783978cef28c8ead085a55c294f881da844b17"],
     "status": "accepted",
     "summary": "Added shared ledger configuration helpers for locating ledger.toml files and selecting project or tool tables"
+  },
+  {
+    "audience": null,
+    "breaking": true,
+    "entry_id": "entry-0002",
+    "internal": false,
+    "kind": "added",
+    "order": 2,
+    "record_revision": 1,
+    "release_version": "0.5.0",
+    "scopes": [],
+    "source_refs": ["git:df962e97093e350b65593a4d3de89b0acb6aa263"],
+    "sources": ["git:df962e97093e350b65593a4d3de89b0acb6aa263"],
+    "status": "accepted",
+    "summary": "Added a schema-3 storage model with derived paths, binding markers, TOML ownership, and migration"
   },
   {
     "audience": null,
@@ -175,6 +204,21 @@
     ],
     "status": "accepted",
     "summary": "Documented Sphinx builds with MyST Markdown and myst-parser dependencies"
+  },
+  {
+    "audience": null,
+    "breaking": false,
+    "entry_id": "entry-0003",
+    "internal": false,
+    "kind": "docs",
+    "order": 3,
+    "record_revision": 1,
+    "release_version": "0.5.0",
+    "scopes": [],
+    "source_refs": ["git:9c1bf72cbf5dcb8985441cf396e4b71131de5aca"],
+    "sources": ["git:9c1bf72cbf5dcb8985441cf396e4b71131de5aca"],
+    "status": "accepted",
+    "summary": "Documented per-ledger sibling storage paths and shared project UUID under one root"
   },
   {
     "audience": null,

@@ -286,6 +286,21 @@ def _copy_tree(source: Path, destination: Path) -> None:
             raise StorageMigrationError(f"migration refuses special file {child}")
 
 
+def _staging_path(
+    source: Path, destination: Path, migration_id: str
+) -> tuple[Path, Path | None]:
+    """Return a staging path that never lives below an ancestor source."""
+    if destination != source and destination.is_relative_to(source):
+        staging_root = source.parent / f"{source.name}.migrating-{migration_id}"
+        return staging_root / destination.relative_to(source), staging_root
+    if source != destination and source.is_relative_to(destination):
+        raise StorageMigrationError(
+            "migration destination is an ancestor of its source; "
+            "use an outside staging target"
+        )
+    return destination.with_name(f".{destination.name}.migrating-{migration_id}"), None
+
+
 def _copy_file(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if source.is_symlink() or not source.is_file():
@@ -397,10 +412,14 @@ def execute_storage_migration(  # noqa: C901
                 write_storage_binding(item.destination.parent, item.destination_binding)
             else:
                 _validate_destination(item.destination, item.destination_binding)
-                temporary = item.destination.with_name(
-                    f".{item.destination.name}.migrating-{plan.migration_id}"
+                temporary, staging_root = _staging_path(
+                    item.source, item.destination, plan.migration_id
                 )
-                if temporary.exists():
+                if staging_root is not None:
+                    if staging_root.exists():
+                        shutil.rmtree(staging_root)
+                    staging_root.mkdir(parents=True, exist_ok=False)
+                elif temporary.exists():
                     shutil.rmtree(temporary)
                 _copy_tree(item.source, temporary)
                 write_storage_binding(temporary, item.destination_binding)
@@ -413,6 +432,8 @@ def execute_storage_migration(  # noqa: C901
                         )
                     item.destination.rmdir()
                 temporary.replace(item.destination)
+                if staging_root is not None:
+                    staging_root.rmdir()
             completed += 1
             _write_journal(plan, journal, "verified")
         if quiescence_check is not None:
