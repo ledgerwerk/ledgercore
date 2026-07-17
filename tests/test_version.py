@@ -41,7 +41,6 @@ def test_source_tree_import_falls_back_without_generated_version(
     result = subprocess.run(
         [
             sys.executable,
-            "-I",
             "-c",
             (
                 "import sys; "
