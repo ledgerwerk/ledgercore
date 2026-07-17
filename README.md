@@ -1,6 +1,6 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/ledgercore)](https://pypi.org/project/ledgercore/)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/indexesledgercore)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/sameledgercore)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ledgercore)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/ledgercore)
 [![codecov](https://codecov.io/github/ledgerwerk/ledgercore/graph/badge.svg?token=ct9sqPtAm0)](https://codecov.io/github/ledgerwerk/ledgercore)
 
 # ledgercore
