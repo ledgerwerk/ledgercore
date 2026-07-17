@@ -128,13 +128,6 @@ class TestParseLedgerProjectManifest:
             ({}, "schema_version must be an integer"),
             (
                 {
-                    "schema_version": 3,
-                    "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
-                },
-                "schema_version must be 2",
-            ),
-            (
-                {
                     "schema_version": True,
                     "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
                 },

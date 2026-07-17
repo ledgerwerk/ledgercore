@@ -251,81 +251,64 @@ not authorize filesystem access. It supports `"basic"`, `"wide"`, and
 
 ## Ledger project layout
 
-`ledgercore` 0.4.0 provides the canonical Ledger-family project layout plus one
-fixed built-in `sibling-ledger` workspace provider. `ledgercore` parses mappings
-only: downstream tools remain responsible for TOML loading, marker initialization,
-migration workflows, and any CLI behavior. Tool configuration remains project-local
-at `.ledger/task/config.toml`; the selected external data root is machine-local.
+`ledgercore` 0.5.0 uses schema 3 for one deterministic storage model. TOML parsing, writing, ownership markers, and explicit migration are Ledgercore APIs. The normal configuration is:
+
+```toml
+schema_version = 3
+
+[project]
+uuid = "081c7c05-2d10-42b7-9b37-3d814c2f400a"
+name = "taskledger"
+
+[ledgers.taskledger.mounts.data]
+storage = "external"
+root = "../ledger"
+
+[ledgers.taskledger.mounts.indexes]
+storage = "cache"
+```
+
+The config path is always `.ledger/taskledger/config.toml`. Mount paths are derived:
+
+```text
+project:   .ledger/<tool>/<mount>
+external:  <root>/<tool>/<project-uuid>/<mount>
+user-data: <user-data>/ledgerwerk/<tool>/<project-uuid>/<mount>
+cache:     <user-cache>/ledgerwerk/<tool>/<project-uuid>/<checkout-id>/<mount>
+```
+
+A committed external root needs no local file. A machine-local override can change one existing mount:
+
+```toml
+schema_version = 3
+
+[ledgers.taskledger.mounts.data]
+storage = "user-data"
+```
+
+Load and resolve the project through Ledgercore:
 
 ```python
 from pathlib import Path
 
-from ledgercore import (
-    locate_ledger_project,
-    parse_ledger_project_manifest,
-    resolve_ledger_layout,
-)
-from ledgercore.layout import PlatformRoots
+from ledgercore import load_ledger_project, resolve_ledger_layout
 
-locator = locate_ledger_project(Path.cwd())
-if locator is not None and not locator.is_legacy:
-    manifest = parse_ledger_project_manifest(
-        {
-            "schema_version": 2,
-            "project": {"uuid": "565c0312-b531-4d07-aa1f-32c796f58dae"},
-            "ledgers": {
-                "taskledger": {
-                    "config": {"location": "project", "path": "task/config.toml"},
-                    "mounts": {
-                        "data": {
-                            "storage": "workspace",
-                            "scope": "project",
-                            "path": "task/taskledger",
-                        },
-                        "records": {"storage": "repository", "path": "task/records"},
-                    },
-                }
-            },
-        }
-    )
-    layout = resolve_ledger_layout(
-        locator,
-        manifest,
-        "taskledger",
-        platform_roots=PlatformRoots(
-            user_data=Path("/tmp/ledger-data"),
-            user_cache=Path("/tmp/ledger-cache"),
-        ),
-    )
-    data_dir = layout.mounts["data"].path
-    records_dir = layout.mounts["records"].path
+project = load_ledger_project(Path.cwd())
+layout = resolve_ledger_layout(
+    project.locator,
+    project.manifest,
+    "taskledger",
+    local_overrides=project.local_overrides,
+ )
 ```
 
-Repository mounts resolve beneath `.ledger/`. Normal workspace and cache roots use
-`projects/<project-uuid>/project` or
-`projects/<project-uuid>/checkouts/<checkout-id>` depending on scope. To select the
-flat sibling convention, create `.ledger/ledger.local.toml` with:
+The four storage kinds are `project`, `external`, `user-data`, and `cache`. Schema 3 has no provider, namespace, configurable mount path, config location, or generic scope. External roots may be project-relative; absolute roots are intended for local overrides. Resolution and ordinary reads never move or create data.
 
-```toml
-[storage.workspace]
-provider = "sibling-ledger"
-```
+Every config directory and mount can be explicitly initialized with a `.ledger-project.toml` marker. External roots use `.ledger-store.toml`; legacy `.ledger-store` is accepted only for compatibility. Mismatched markers and unbound non-empty directories are rejected.
 
-The provider resolves `<project-root>/../ledger` and requires the regular marker
-`../ledger/.ledger-store`. With the project mount above, the effective Taskledger
-data path is `../ledger/task/taskledger`. The selected root must already exist,
-missing storage is fatal, no fallback occurs, and `ledgercore` does not invoke Git.
-A separately version-controlled workspace is supported. Taskledger owns project
-binding, authoritative ID allocation, migration, and synchronization.
+Storage changes use `plan_storage_migration` and `execute_storage_migration`. Planning is side-effect free. Execution validates bindings, uses temporary destinations and SHA-256 verification, requires a downstream quiescence callback for durable mounts, switches configuration atomically, journals progress, and removes the source only after successful activation.
 
-On another computer, clone or otherwise provision the external store as the sibling
-`../ledger`, ensure `.ledger-store` is a regular file, then use the same local provider
-selection. Ledgercore validates the selected root but does not perform Git operations.
-Taskledger must bind the direct mount to the project before use and derive the next
-numeric task ID from validated active, archived, and tombstone records. It must not
-persist a redundant next-task counter. Disconnected computers can choose the same
-numeric ID, so pull before creating tasks, commit and push promptly, and resolve Git
-conflicts explicitly.
+Schema 2 remains readable for explicit migration and emits a deprecation warning. The old provider and `sibling-ledger` vocabulary is compatibility input only.
 
 ## Shared ledger config convention
 
@@ -456,8 +439,8 @@ SETUPTOOLS_SCM_PRETEND_VERSION=X.Y.Z python -m build
 
 `ledgercore` is pre-1.0. Patch releases preserve the current minor API where
 practical. Minor releases may intentionally evolve public APIs before 1.0,
-with changelog and migration guidance. The 0.4.0 release adds the fixed
-sibling-ledger workspace convention while preserving namespaced root overrides.
+with changelog and migration guidance. The 0.5.0 release adds schema-3
+storage simplification while retaining schema-2 compatibility for migration.
 
 ## License
 

@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 import uuid
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -115,6 +116,10 @@ class ResolvedMount:
     scoped_root: Path
     path: Path
     source: StorageResolutionSource
+    root: Path | None = None
+    binding_path: Path | None = None
+    project_uuid: str | None = None
+    tool: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,7 @@ class ResolvedLedgerLayout:
     tool_config_path: Path | None
     checkout_id: str | None
     mounts: Mapping[str, ResolvedMount]
+    config_binding_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -374,7 +380,17 @@ def _validate_owned_paths(manifest: LedgerProjectManifest) -> None:
 
 
 def parse_ledger_project_manifest(document: Mapping[str, Any]) -> LedgerProjectManifest:
-    """Parse a schema-version-2 Ledger project manifest from a mapping."""
+    """Parse a schema-version-2 or schema-version-3 project manifest."""
+    if document.get("schema_version") == 3:
+        from ledgercore.manifest import parse_ledger_manifest_v3
+
+        return parse_ledger_manifest_v3(document)  # type: ignore[return-value]
+
+    warnings.warn(
+        "schema-2 Ledger manifests are deprecated; migrate to schema 3 explicitly",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     _check_unknown_fields(document, "manifest", _TOP_LEVEL_FIELDS)
 
     schema_version = _require_int(document.get("schema_version"), "schema_version")
@@ -716,7 +732,7 @@ def _selected_family_root(
 def _scoped_root(
     base_root: Path,
     project_uuid: str,
-    scope: StorageScope,
+    scope: Any,
     checkout_id: str,
 ) -> Path:
     project_base = base_root / "projects" / project_uuid
@@ -725,18 +741,159 @@ def _scoped_root(
     return (project_base / "checkouts" / checkout_id).resolve(strict=False)
 
 
-def resolve_ledger_layout(
+def _resolve_schema3_layout(
     locator: LedgerProjectLocator,
-    manifest: LedgerProjectManifest,
+    manifest: Any,
     ledger_name: str,
     *,
-    local_config: LedgerLocalConfig | None = None,
+    local_overrides: object | None,
+    cache_root: Path | None,
+    checkout_id: str | None,
+    environ: Mapping[str, str] | None,
+    platform_roots: PlatformRoots | None,
+) -> ResolvedLedgerLayout:
+    from platformdirs import user_cache_path, user_data_path
+
+    from ledgercore.manifest import (
+        LedgerLocalOverrides,
+        apply_ledger_local_overrides,
+    )
+    from ledgercore.storage_paths import (
+        derive_cache_mount_path,
+        derive_external_mount_path,
+        derive_project_mount_path,
+        derive_tool_config_path,
+        derive_user_data_mount_path,
+        resolve_external_root,
+    )
+    from ledgercore.storage_paths import (
+        derive_checkout_id as derive_schema3_checkout_id,
+    )
+
+    if locator.is_legacy:
+        raise LedgerLayoutError(
+            "legacy project locators support discovery only; resolve from "
+            "canonical .ledger/ledger.toml"
+        )
+    _check_locator_consistency(locator)
+    project_root = locator.project_root.resolve(strict=False)
+    config_root = locator.config_root.resolve(strict=False)
+    registration = manifest.ledgers.get(ledger_name)
+    if registration is None:
+        raise LedgerLayoutError(f"unknown ledger registration: {ledger_name}")
+    overrides = local_overrides
+    if overrides is None:
+        overrides = LedgerLocalOverrides(schema_version=3, ledgers=_freeze_mapping({}))
+    effective = apply_ledger_local_overrides(manifest, overrides)  # type: ignore[arg-type]
+    effective_registration = effective[ledger_name]
+    env = os.environ if environ is None else environ
+    roots = platform_roots or PlatformRoots(
+        user_data=Path(user_data_path("ledgerwerk", appauthor=False)),
+        user_cache=Path(user_cache_path("ledgerwerk", appauthor=False)),
+    )
+    cache_base = (cache_root or roots.user_cache).resolve(strict=False)
+    needs_checkout = any(
+        mount.storage == "cache" for mount in effective_registration.mounts.values()
+    )
+    selected_checkout = None
+    if needs_checkout:
+        selected_checkout = (
+            checkout_id
+            or env.get("LEDGER_CHECKOUT_ID")
+            or derive_schema3_checkout_id(project_root)
+        )
+        selected_checkout = _require_safe_segment(selected_checkout, "checkout_id")
+    resolved_mounts: dict[str, ResolvedMount] = {}
+    for mount_name, mount in effective_registration.mounts.items():
+        if mount.storage == "project":
+            root = (project_root / ".ledger" / ledger_name).resolve(strict=False)
+            path = derive_project_mount_path(project_root, ledger_name, mount_name)
+            scope: StorageScope = "project"
+        elif mount.storage == "external":
+            assert mount.external_root is not None
+            root = resolve_external_root(mount.external_root, project_root=project_root)
+            path = derive_external_mount_path(
+                mount.external_root,
+                ledger_name,
+                manifest.project_uuid,
+                mount_name,
+                project_root=project_root,
+            )
+            scope = "project"
+        elif mount.storage == "user-data":
+            root = roots.user_data.resolve(strict=False)
+            path = derive_user_data_mount_path(
+                root,
+                ledger_name,
+                manifest.project_uuid,
+                mount_name,
+            )
+            scope = "project"
+        else:
+            if selected_checkout is None:
+                raise LedgerLayoutError("cache resolution requires a checkout ID")
+            root = cache_base
+            path = derive_cache_mount_path(
+                root,
+                ledger_name,
+                manifest.project_uuid,
+                selected_checkout,
+                mount_name,
+            )
+            scope = "checkout"
+        source = cast(Any, mount.source)
+        resolved_mounts[mount_name] = ResolvedMount(
+            name=mount_name,
+            storage=cast(Any, mount.storage),
+            scope=scope,
+            scoped_root=root,
+            path=path,
+            source=source,
+            root=root,
+            binding_path=path / ".ledger-project.toml",
+            project_uuid=manifest.project_uuid,
+            tool=ledger_name,
+        )
+    config_path = derive_tool_config_path(project_root, ledger_name)
+    return ResolvedLedgerLayout(
+        ledger_name=ledger_name,
+        project_uuid=manifest.project_uuid,
+        project_root=project_root,
+        config_root=config_root,
+        manifest_path=locator.manifest_path.resolve(strict=False),
+        local_config_path=locator.local_config_path.resolve(strict=False),
+        tool_config_path=config_path,
+        checkout_id=selected_checkout,
+        mounts=_freeze_mapping(resolved_mounts),
+        config_binding_path=config_path.parent / ".ledger-project.toml",
+    )
+
+
+def resolve_ledger_layout(
+    locator: LedgerProjectLocator,
+    manifest: Any,
+    ledger_name: str,
+    *,
+    local_config: Any = None,
     workspace_root: Path | None = None,
     cache_root: Path | None = None,
     checkout_id: str | None = None,
     environ: Mapping[str, str] | None = None,
     platform_roots: PlatformRoots | None = None,
+    local_overrides: object | None = None,
 ) -> ResolvedLedgerLayout:
+    """Resolve a schema-2 or schema-3 layout without creating files."""
+    if getattr(manifest, "schema_version", None) == 3:
+        return _resolve_schema3_layout(
+            locator,
+            manifest,
+            ledger_name,
+            local_overrides=local_overrides or local_config,
+            cache_root=cache_root,
+            checkout_id=checkout_id,
+            environ=environ,
+            platform_roots=platform_roots,
+        )
     """Resolve layout paths for one registered ledger."""
     if locator.is_legacy:
         raise LedgerLayoutError(

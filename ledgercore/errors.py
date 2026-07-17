@@ -24,10 +24,28 @@ class LedgerLayoutError(LedgerConfigError):
     code: str = "LEDGER_LAYOUT_ERROR"
 
 
+class TomlConfigError(LedgerConfigError):
+    """Raised when Ledgercore TOML configuration cannot be read or written."""
+
+    code: str = "TOML_CONFIG_ERROR"
+
+
+class StorageBindingError(LedgerLayoutError):
+    """Raised when a storage ownership marker is invalid."""
+
+    code: str = "STORAGE_BINDING_ERROR"
+
+
 class StorageError(LedgerCoreError):
     """Base exception for storage-related errors."""
 
     code: str = "STORAGE_ERROR"
+
+
+class StorageMigrationError(StorageError):
+    """Raised when an explicit storage migration cannot complete safely."""
+
+    code: str = "STORAGE_MIGRATION_ERROR"
 
 
 class AtomicWriteError(StorageError):

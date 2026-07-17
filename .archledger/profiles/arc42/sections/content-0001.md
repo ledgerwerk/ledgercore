@@ -35,9 +35,9 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 2. Produce deterministic, human-readable JSON, JSONL, YAML, and YAML-front-matter files.
 3. Validate untrusted relative path strings before resolving them under a trusted base.
 4. Provide canonical local and cross-ledger numeric identifiers.
-5. Discover canonical Ledger-family project manifests and resolve repository, workspace, and cache topology without writing to the filesystem.
-6. Expose a typed, framework-neutral API with a shared exception hierarchy.
-7. Keep domain schemas, TOML parsing, orchestration, locking, synchronization, migrations, and user interfaces in downstream applications.
+5. Discover canonical Ledger-family manifests and resolve the deterministic schema-3 storage model without writing during ordinary resolution.
+6. Own typed TOML configuration, storage binding markers, and explicit migration planning and execution behind a framework-neutral API.
+7. Keep domain schemas, locking, synchronization, and user interfaces in downstream applications.
 
 ## Quality priorities
 
@@ -54,7 +54,7 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Transactions spanning multiple files
 - Authentication, authorization, encryption, or secret management
 - Remote storage, synchronization, indexing, querying, or database abstraction
-- TOML file parsing, migration orchestration, or a Ledger-family CLI
-- CLI error rendering or exit-code policy
-- Generic provider declarations, direct cache or checkout providers, workspace tool configuration, and external Git synchronization. The 0.4.0 layout surface supports one explicitly selected built-in direct sibling workspace provider.
-- Automated layout migration. Migration to the canonical layout is downstream-owned and explicit.
+- A Ledger-family CLI, CLI error rendering, or exit-code policy
+- Domain-specific lock parsing, synchronization, Git operations, or background migration
+- Remote, object, database, plug-in, arbitrary path-template, namespace, or generic scope storage
+- Silent data adoption or implicit movement during reads and ordinary layout resolution

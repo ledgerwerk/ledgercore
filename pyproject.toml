@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "PyYAML",
     "platformdirs",
+    "tomlkit",
 ]
 
 [project.urls]

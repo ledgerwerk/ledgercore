@@ -32,9 +32,9 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 2. Produce deterministic, human-readable JSON, JSONL, YAML, and YAML-front-matter files.
 3. Validate untrusted relative path strings before resolving them under a trusted base.
 4. Provide canonical local and cross-ledger numeric identifiers.
-5. Discover canonical Ledger-family project manifests and resolve repository, workspace, and cache topology without writing to the filesystem.
-6. Expose a typed, framework-neutral API with a shared exception hierarchy.
-7. Keep domain schemas, TOML parsing, orchestration, locking, synchronization, migrations, and user interfaces in downstream applications.
+5. Discover canonical Ledger-family manifests and resolve the deterministic schema-3 storage model without writing during ordinary resolution.
+6. Own typed TOML configuration, storage binding markers, and explicit migration planning and execution behind a framework-neutral API.
+7. Keep domain schemas, locking, synchronization, and user interfaces in downstream applications.
 
 ## Quality priorities
 
@@ -51,10 +51,10 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Transactions spanning multiple files
 - Authentication, authorization, encryption, or secret management
 - Remote storage, synchronization, indexing, querying, or database abstraction
-- TOML file parsing, migration orchestration, or a Ledger-family CLI
-- CLI error rendering or exit-code policy
-- Generic provider declarations, direct cache or checkout providers, workspace tool configuration, and external Git synchronization. The 0.4.0 layout surface supports one explicitly selected built-in direct sibling workspace provider.
-- Automated layout migration. Migration to the canonical layout is downstream-owned and explicit.
+- A Ledger-family CLI, CLI error rendering, or exit-code policy
+- Domain-specific lock parsing, synchronization, Git operations, or background migration
+- Remote, object, database, plug-in, arbitrary path-template, namespace, or generic scope storage
+- Silent data adoption or implicit movement during reads and ordinary layout resolution
 
 ## Requirements Overview
 
@@ -70,15 +70,15 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 
 # Architecture Constraints
 
-| Constraint                    | Architectural consequence                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------------------------- |
-| Python 3.10 or newer          | Modern annotations, dataclasses, literals, and `pathlib` are available                    |
-| Reviewed runtime dependencies | PyYAML handles YAML safely and `platformdirs` provides OS-correct user data/cache roots   |
-| Typed package (`py.typed`)    | Public behavior must remain statically consumable; strict mypy is the target              |
-| Local filesystem abstraction  | Atomicity, layout resolution, and durability depend on host filesystem and OS semantics   |
-| UTF-8 text files              | Text readers and writers explicitly encode/decode UTF-8                                   |
-| No application framework      | Downstream code owns logging, CLI output, configuration, parsing, migration, and recovery |
-| Apache-2.0 distribution       | Source and packages remain compatible with that license                                   |
+| Constraint                    | Architectural consequence                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Python 3.10 or newer          | Modern annotations, dataclasses, literals, and `pathlib` are available                                   |
+| Reviewed runtime dependencies | PyYAML handles YAML safely, `platformdirs` provides OS roots, and `tomlkit` round-trips user-edited TOML |
+| Typed package (`py.typed`)    | Public behavior must remain statically consumable; strict mypy is the target                             |
+| Local filesystem abstraction  | Atomicity, layout resolution, and durability depend on host filesystem and OS semantics                  |
+| UTF-8 text files              | Text readers and writers explicitly encode/decode UTF-8                                                  |
+| No application framework      | Downstream code owns logging, CLI output, configuration, parsing, migration, and recovery                |
+| Apache-2.0 distribution       | Source and packages remain compatible with that license                                                  |
 
 ## Product constraints
 
@@ -150,8 +150,8 @@ Local filesystem
 ## Outside the boundary
 
 - Record schemas, ownership, and workflows
-- TOML parsing, migration commands, and layout-writing workflows
-- Multi-file consistency, recovery journals, and inter-process locking
+- Downstream CLI presentation, domain lock parsing, Git synchronization, and network access
+- Remote storage, background work, or cross-process locking policy
 - Filesystem permissions and trust policy
 - UI, observability, configuration parsing, Git synchronization, and network access
 - Choice of ledger codes, kinds, and relation semantics
@@ -168,13 +168,13 @@ The downstream application owns all persisted data. `ledgercore` keeps no catalo
 
 # Solution Strategy
 
-The architecture remains a stateless utility library organized by technical concern. The 0.4.0 canonical layout layer standardizes shared Ledger-family topology and adds one explicitly selected direct sibling workspace convention without introducing services, Git synchronization, migration flows, or process-global state.
+The architecture remains a stateless utility library organized by technical concern. The 0.5.0 layout layer standardizes schema-3 storage kinds, owns TOML and binding markers, and provides explicit recoverable migration without introducing services, Git synchronization, or process-global state.
 
 1. **Filesystem safety by explicit primitives.** Atomic replacement writes a temporary sibling, optionally flushes it, calls `os.replace`, and optionally flushes the parent. Create-only writes use `O_CREAT | O_EXCL`.
 2. **Validation at format boundaries.** JSON/YAML loaders require the expected root shape; front matter requires a mapping; IDs, refs, and paths are parsed before use.
 3. **Canonical representations.** JSON hashing uses compact sorted-key output; JSON files use sorted keys and a final newline; references normalize aliases to one model.
 4. **Explicit policies.** Missing/empty handling, atomic writes, sorting, body normalization, recursion, aliases, allowlists, and fsync behavior are arguments.
-5. **Read-only layout resolution.** Canonical project discovery, manifest parsing, checkout identity, sibling marker validation, and storage-path resolution are mapping-based and perform no writes. The sibling backend fails without fallback when its root or marker is absent.
+5. **Side-effect-free normal path.** Canonical project discovery, manifest parsing, overlay application, checkout identity, binding validation, and storage-path resolution do not write. Explicit initialization and migration APIs are the only layout write boundaries.
 6. **Immutable value objects.** Parsed IDs, references, fingerprints, config locations, layouts, and JSONL results use frozen dataclasses.
 7. **Layered errors.** Modules wrap low-level parse and I/O failures in package-specific errors and preserve causes.
 8. **No retained state.** Calls depend only on arguments, filesystem state, environment, platform conventions, and clock.
@@ -183,7 +183,10 @@ The architecture remains a stateless utility library organized by technical conc
 
 - Serialization modules delegate atomic output to `atomic`.
 - `hashing` composes front matter parsing and canonical JSON.
-- `layout` composes `config`, `ids`, and strict path helpers while keeping TOML parsing downstream.
+- `manifest` and `overrides` own typed schema parsing and immutable overlay semantics.
+- `tomlio` owns round-trip TOML and loaded-project behavior.
+- `storage_paths` owns pure formulas; `storage_binding` owns marker identity and validation; `migration` owns verified movement and journals.
+- `layout` remains the public resolution facade and schema-2 compatibility wrapper.
 - `path_text` is separate from `paths`: normalization aids matching, while authorization requires strict validation.
 - `refs` and `ids` are separate because references add namespaces and aliases while generic IDs support configurable segments.
 - The package root provides discoverability; direct module imports permit narrow dependencies.

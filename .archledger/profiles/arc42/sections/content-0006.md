@@ -52,12 +52,13 @@ Before replacement, a failure triggers best-effort cleanup and `AtomicWriteError
 
 ## Project layout resolution
 
-1. Discover `.ledger/ledger.toml` from a starting path while preserving legacy-source signals when needed for migration diagnostics.
-2. Parse the project manifest and optional local config from caller-supplied mappings.
-3. Select workspace and cache family roots from explicit arguments, environment overrides, local config, or built-in `platformdirs` defaults.
-4. Derive a checkout ID only when a ledger needs checkout-scoped data.
-5. Resolve repository mounts beneath `.ledger/` and external mounts beneath fixed `projects/<uuid>/project` or `projects/<uuid>/checkouts/<checkout-id>` roots.
-6. Return immutable layout objects without creating directories, markers, or config files.
+1. Discover `.ledger/ledger.toml` and read schema 2 or schema 3 through Ledgercore TOML I/O.
+2. Parse schema 3 and an optional strict local overlay, then derive effective mount values.
+3. Derive `.ledger/<tool>/config.toml` and fixed project, external, user-data, or checkout-cache paths.
+4. Validate external store and project binding markers without writing.
+5. Plan migrations from independently resolved source and target layouts.
+6. Execute explicit migrations through temporary destinations, verification, quiescence checks, atomic configuration switching, and journals.
+7. Return immutable layout and migration values; ordinary resolution creates no directories, markers, or config files.
 
 ## Reference normalization
 

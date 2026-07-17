@@ -190,64 +190,38 @@ Safe relative POSIX path validation, config discovery, config-relative resolutio
 | `locate_config(start, filenames, *, default_filename=None)`                             | Find a config file and return a `ConfigLocator`.                    |
 | `resolve_config_relative_path(config_path, value, *, field_name)`                       | Resolve a relative path relative to the config file's directory.    |
 
-(ledgercorelayout)=
-TK:
+(ledgercoremanifest)=
 
-## `ledgercore.layout`
+## `ledgercore.manifest`, `ledgercore.overrides`, and `ledgercore.tomlio`
 
-TK:
-PM:Typed Ledger-family project layout parsing and resolution. The public parser
-WB:APIs accept mappings rather than TOML file paths.
-JR:
-**Package-root facade.** The following layout symbols are re-exported from the
-top-level `ledgercore` package for convenience and form the supported public
-layout facade. Detailed layout dataclasses are intentionally kept under
-`ledgercore.layout` and must not be imported from the package root.
+Schema 3 is the normal project layout. `StorageKind` is one of `project`, `external`, `user-data`, or `cache`. `LedgerProjectManifest`, `LedgerRegistration`, and `MountDefinition` are frozen values. `LedgerLocalOverrides` contains only overrides for existing tools and mounts.
 
-| Symbol                               | Description                                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `LedgerProjectLocator`               | Frozen dataclass with `project_root`, `config_root`, `manifest_path`, `local_config_path`, and `source`.     |
-| `ResolvedLedgerLayout`               | Frozen dataclass with resolved project, config, optional tool config, checkout ID, and named mounts.         |
-| `locate_ledger_project(start, ...)`  | Locate a canonical `.ledger/ledger.toml` project manifest or a legacy fallback.                              |
-| `parse_ledger_project_manifest(...)` | Strictly parse a schema-version-2 project manifest mapping.                                                  |
-| `parse_ledger_local_config(...)`     | Parse the optional schema-version-1 local override mapping.                                                  |
-| `resolve_ledger_layout(...)`         | Resolve repository, workspace, cache, and tool-config paths for one registered ledger.                       |
-| `derive_checkout_id(project_root)`   | Derive a deterministic checkout ID from the normalized project path. Retained at the root for 0.2.x callers. |
+| Symbol                                                              | Description                                         |
+| ------------------------------------------------------------------- | --------------------------------------------------- |
+| `parse_ledger_manifest_v3(document)`                                | Strict schema-3 mapping parser.                     |
+| `parse_ledger_local_overrides_v3(document, base=...)`               | Strict schema-aware local overlay parser.           |
+| `load_ledger_project(start, ...)`                                   | Locate, read, overlay, and return a loaded project. |
+| `read_ledger_manifest(path)`                                        | Read schema 2 or schema 3 TOML.                     |
+| `write_ledger_manifest(path, manifest, ...)`                        | Atomically write schema 3 TOML.                     |
+| `read_ledger_local_config(path, base=...)`                          | Read a schema-3 local overlay.                      |
+| `write_ledger_local_config(path, overrides, ...)`                   | Atomically write or delete an empty overlay.        |
+| `set_local_mount_override(...)` / `clear_local_mount_override(...)` | Return immutable local values without writing.      |
 
-**Detailed layout surface.** The symbols below are public from `ledgercore.layout`
-but are intentionally NOT re-exported from the package root. Use the explicit
-module import to keep the curated facade small.
+## `ledgercore.storage_paths`
 
-| Symbol                  | Description                                                                 |
-| ----------------------- | --------------------------------------------------------------------------- |
-| `StorageClass`          | Literal type: `"repository"`, `"workspace"`, or `"cache"`.                  |
-| `StorageScope`          | Literal type: `"project"` or `"checkout"`.                                  |
-| `ConfigLocation`        | Literal type: `"project"` or `"workspace"`.                                 |
-| `PlatformRoots`         | Frozen dataclass with `user_data` and `user_cache` family-root paths.       |
-| `LedgerMount`           | Frozen dataclass describing one named mount.                                |
-| `ToolConfigDefinition`  | Frozen dataclass describing one ledger config location.                     |
-| `LedgerRegistration`    | Frozen dataclass with one ledger name, config definition, and named mounts. |
-| `LedgerProjectManifest` | Frozen dataclass describing the parsed schema-version-2 project manifest.   |
-| `LedgerLocalConfig`     | Frozen dataclass for optional machine-local overrides.                      |
-| `ResolvedMount`         | Frozen dataclass with resolved mount path, scoped root, and source.         |
+Pure path helpers derive `.ledger/<tool>/config.toml`, project mounts, external mounts below `<root>/<tool>/<uuid>/<mount>`, user-data mounts, and checkout cache mounts below `<cache>/<tool>/<uuid>/<checkout>/<mount>`.
 
-`StorageResolutionSource` includes `"local-provider"` for the selected built-in
-`sibling-ledger` workspace backend. This is an internal resolution detail; there is
-no public provider declaration or topology type. The accepted machine-local provider
-value is `sibling-ledger`. It resolves a direct project-scoped workspace mount below
-`<project-root>/../ledger` and requires a regular `.ledger-store` marker there.
+## `ledgercore.storage_binding`
 
-Root overrides remain namespaced and preserve the existing precedence order. The
-direct provider rejects cache selection, checkout-scoped workspace mounts, unknown
-provider names, workspace-located tool configuration, and missing or invalid sibling
-storage without fallback. Resolution is read-only. Downstream tools own marker
-initialization, project binding, migration, ID allocation, and Git behavior.
+`StorageBinding` describes a `.ledger-project.toml` marker. `initialize_storage_binding`, `initialize_config_binding`, `read_storage_binding`, `write_storage_binding`, `validate_storage_binding`, and `validate_ledger_layout_storage` provide explicit marker lifecycle and read-only validation. `initialize_external_store` and `validate_external_store` manage `.ledger-store.toml`.
 
-`parse_ledger_project_manifest` and `parse_ledger_local_config` accept mappings,
-not TOML file paths. Manually built manifests that bypass parser validation remain
-unsupported inputs when they request workspace tool configuration; the resolver rejects
-that configuration explicitly.
-SM:
+## `ledgercore.migration`
+
+`plan_storage_migration` resolves source and target layouts without writes. `execute_storage_migration` performs verified copy or cache rebuild with temporary destinations, a downstream quiescence callback, atomic configuration switching, cleanup, and a journal. `inspect_storage_migration` reads a journal; `recover_storage_migration` reports completed migrations. `plan_schema_v2_to_v3` provides conservative schema conversion.
+
+## `ledgercore.layout` compatibility facade
+
+`parse_ledger_project_manifest` dispatches schema 2 and schema 3 mappings. The schema-2 layout dataclasses and provider vocabulary remain compatibility inputs and emit deprecation warnings. Schema-3 resolution is side-effect free and returns deterministic config and mount paths.
 
 ## `ledgercore.path_text`
 

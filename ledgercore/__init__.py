@@ -29,7 +29,10 @@ from ledgercore.errors import (
     LedgerCoreError,
     LedgerLayoutError,
     PathValidationError,
+    StorageBindingError,
     StorageError,
+    StorageMigrationError,
+    TomlConfigError,
     YamlStoreError,
 )
 from ledgercore.frontmatter import (
@@ -131,6 +134,57 @@ from ledgercore.paths import (
     resolve_under_base,
     validate_relative_posix_path,
 )
+from ledgercore.manifest import (
+    EffectiveLedgerRegistration,
+    EffectiveMount,
+    LedgerLocalOverrides,
+    MountDefinition,
+    MountOverride,
+    StorageKind,
+    apply_ledger_local_overrides,
+    parse_ledger_local_overrides_v3,
+    parse_ledger_manifest_v3,
+)
+from ledgercore.migration import (
+    StorageMigrationItem,
+    StorageMigrationJournal,
+    StorageMigrationPlan,
+    StorageMigrationResult,
+    execute_storage_migration,
+    inspect_storage_migration,
+    plan_schema_v2_to_v3,
+    plan_storage_migration,
+    recover_storage_migration,
+)
+from ledgercore.storage_binding import (
+    StorageBinding,
+    StorageValidationReport,
+    StorageValidationResult,
+    initialize_config_binding,
+    initialize_external_store,
+    initialize_storage_binding,
+    read_storage_binding,
+    validate_external_store,
+    validate_ledger_layout_storage,
+    validate_storage_binding,
+    write_storage_binding,
+)
+from ledgercore.storage_paths import (
+    derive_cache_mount_path,
+    derive_external_mount_path,
+    derive_project_mount_path,
+    derive_tool_config_path,
+    derive_user_data_mount_path,
+)
+from ledgercore.tomlio import (
+    clear_local_mount_override,
+    load_ledger_project,
+    read_ledger_local_config,
+    read_ledger_manifest,
+    set_local_mount_override,
+    write_ledger_local_config,
+    write_ledger_manifest,
+)
 from ledgercore.time import Timespec, TimezoneStyle, utc_now_iso
 from ledgercore.yamlio import load_yaml_object, write_yaml
 
@@ -157,6 +211,9 @@ __all__ = [
     "LedgerCoreError",
     "PathValidationError",
     "StorageError",
+    "StorageBindingError",
+    "StorageMigrationError",
+    "TomlConfigError",
     "YamlStoreError",
     "BodyMode",
     "EmptyStringStyle",
@@ -217,6 +274,23 @@ __all__ = [
     "resolve_ledger_layout",
     "ResolvedLedgerLayout",
     "derive_checkout_id",
+    "load_ledger_project",
+    "read_ledger_manifest",
+    "write_ledger_manifest",
+    "read_ledger_local_config",
+    "write_ledger_local_config",
+    "set_local_mount_override",
+    "clear_local_mount_override",
+    "plan_storage_migration",
+    "execute_storage_migration",
+    "validate_ledger_layout_storage",
+    "StorageKind",
+    "StorageBinding",
+    "StorageValidationReport",
+    "StorageValidationResult",
+    "StorageMigrationPlan",
+    "StorageMigrationItem",
+    "StorageMigrationResult",
     "PunctuationProfile",
     "decode_unicode_escape_literals",
     "normalize_path_text",
