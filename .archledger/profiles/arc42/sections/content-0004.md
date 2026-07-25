@@ -14,7 +14,7 @@ source_refs:
     reason: Core safety and composition strategy
 ---
 
-The architecture remains a stateless utility library organized by technical concern. The 0.5.0 layout layer standardizes schema-3 storage kinds, owns TOML and binding markers, and provides explicit recoverable migration without introducing services, Git synchronization, or process-global state.
+The architecture remains a stateless utility library organized by technical concern. The 0.5.1 layout layer standardizes schema-3 storage kinds, owns TOML and binding markers, and provides explicit copy-only migration with exact journal binding identity, truthful recovery reporting, and manual-intervention classification for incomplete migrations, without introducing services, Git synchronization, or process-global state.
 
 1. **Filesystem safety by explicit primitives.** Atomic replacement writes a temporary sibling, optionally flushes it, calls `os.replace`, and optionally flushes the parent. Create-only writes use `O_CREAT | O_EXCL`.
 2. **Validation at format boundaries.** JSON/YAML loaders require the expected root shape; front matter requires a mapping; IDs, refs, and paths are parsed before use.
@@ -31,7 +31,7 @@ The architecture remains a stateless utility library organized by technical conc
 - `hashing` composes front matter parsing and canonical JSON.
 - `manifest` and `overrides` own typed schema parsing and immutable overlay semantics.
 - `tomlio` owns round-trip TOML and loaded-project behavior.
-- `storage_paths` owns pure formulas; `storage_binding` owns marker identity and validation; `migration` owns verified movement and journals.
+- `storage_paths` owns pure formulas; `storage_binding` owns marker identity, validation, and binding mapping helpers; `migration` owns verified copy-only movement, schema-2 journals with exact binding identity, and truthful recovery reporting.
 - `layout` remains the public resolution facade and schema-2 compatibility wrapper.
 - `path_text` is separate from `paths`: normalization aids matching, while authorization requires strict validation.
 - `refs` and `ids` are separate because references add namespaces and aliases while generic IDs support configurable segments.

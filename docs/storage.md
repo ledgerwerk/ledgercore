@@ -1,6 +1,6 @@
 # Ledgercore storage
 
-Ledgercore 0.5.0 provides one deterministic storage model for Ledgerwerk tools.
+Ledgercore 0.5.1 provides one deterministic storage model for Ledgerwerk tools.
 The normal configuration is schema 3:
 
 ```toml
@@ -133,7 +133,6 @@ plan = plan_storage_migration(
 )
 result = execute_storage_migration(
     plan,
-    mode="move",
     verify="sha256",
     quiescence_check=downstream_has_no_active_writers,
 )
@@ -141,12 +140,27 @@ result = execute_storage_migration(
 
 Planning resolves current and target layouts independently, validates source
 bindings, refuses conflicting destinations, and selects cache rebuild by default.
+Execution defaults to copy-only mode. Destructive `mode="move"` is disabled in
+0.5.1 because source cleanup is not safely recoverable. Durable mounts require
+the downstream quiescence callback.
+
 Execution uses a temporary sibling directory, refuses unexpected symlinks,
 writes the destination binding, verifies regular files, switches configuration
-atomically, and removes the old source only after successful activation. Durable
-mounts require the downstream quiescence callback. A journal is stored under
-`.ledger/migrations/<migration-id>.toml` with phases `planned`, `copying`,
-`verified`, `config-switched`, `complete`, or `failed`.
+atomically, and retains the source after successful activation. A schema-2
+journal is stored under `.ledger/migrations/<migration-id>.toml` with phases
+`planned`, `copying`, `verified`, `config-switched`, `complete`, or `failed`.
+
+Journal schema 2 persists exact source and destination binding identity,
+execution mode, verification mode, project root, items completed, and source
+removal outcome. Schema-1 journals from earlier versions remain inspectable
+but bindings are represented as `None` because the original journal did not
+persist them.
+
+Recovery of completed journals returns `source_removed=False` for schema-2
+copy journals and `source_removed=None` for schema-1 completed journals.
+Incomplete journals in any phase (`planned`, `copying`, `verified`,
+`config-switched`, or `failed`) require manual intervention; Ledgercore 0.5.1
+can inspect them but cannot safely resume or complete them automatically.
 
 Schema 2 can be read for migration. `plan_schema_v2_to_v3` provides conservative
 conversion for simple layouts. Schema-2 provider, namespace, custom path, and

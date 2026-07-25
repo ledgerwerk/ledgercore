@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -23,6 +23,8 @@ from ledgercore.manifest import (
 from ledgercore.storage_binding import (
     StorageBinding,
     read_storage_binding,
+    storage_binding_from_mapping,
+    storage_binding_to_mapping,
     write_storage_binding,
 )
 from ledgercore.tomlio import write_ledger_local_config, write_ledger_manifest
@@ -30,6 +32,7 @@ from ledgercore.tomlio import write_ledger_local_config, write_ledger_manifest
 MigrationStrategy = Literal["copy", "rebuild", "noop"]
 MigrationMode = Literal["copy", "move"]
 VerifyMode = Literal["sha256", "size"]
+MigrationRecoveryCapability = Literal["completed-only", "manual-intervention"]
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,19 @@ class StorageMigrationItem:
     source_binding: StorageBinding
     destination_binding: StorageBinding
     strategy: MigrationStrategy
+
+
+@dataclass(frozen=True)
+class StorageMigrationJournalItem:
+    item_id: str
+    component: Literal["config", "mount"]
+    tool_name: str
+    mount_name: str
+    source: Path
+    destination: Path
+    strategy: MigrationStrategy
+    source_binding: StorageBinding | None = None
+    destination_binding: StorageBinding | None = None
 
 
 @dataclass(frozen=True)
@@ -58,7 +74,7 @@ class StorageMigrationResult:
     migration_id: str
     phase: str
     items_completed: int
-    source_removed: bool
+    source_removed: bool | None
     journal_path: Path
 
 
@@ -68,8 +84,15 @@ class StorageMigrationJournal:
     phase: str
     project_uuid: str
     journal_path: Path
-    items: tuple[StorageMigrationItem, ...]
+    items: tuple[StorageMigrationJournalItem, ...]
     error: str | None = None
+    schema_version: int = 1
+    mode: MigrationMode | None = None
+    verify: VerifyMode | None = None
+    project_root: Path | None = None
+    items_completed: int | None = None
+    source_removed: bool | None = None
+    recovery_capability: MigrationRecoveryCapability = "manual-intervention"
 
 
 def _binding(layout: Any, mount_name: str, storage: str) -> StorageBinding:
@@ -315,13 +338,27 @@ def _journal_path(plan: StorageMigrationPlan, project_root: Path) -> Path:
 
 
 def _write_journal(
-    plan: StorageMigrationPlan, path: Path, phase: str, error: str | None = None
+    plan: StorageMigrationPlan,
+    path: Path,
+    *,
+    phase: str,
+    mode: MigrationMode,
+    verify: VerifyMode,
+    project_root: Path,
+    items_completed: int,
+    source_removed: bool,
+    error: str | None = None,
 ) -> None:
     doc = table()
-    doc.add("schema_version", 1)
+    doc.add("schema_version", 2)
     doc.add("migration_id", plan.migration_id)
     doc.add("project_uuid", plan.project_uuid)
     doc.add("phase", phase)
+    doc.add("mode", mode)
+    doc.add("verify", verify)
+    doc.add("project_root", str(project_root))
+    doc.add("items_completed", items_completed)
+    doc.add("source_removed", source_removed)
     if error is not None:
         doc.add("error", error)
     items = table()
@@ -333,6 +370,14 @@ def _write_journal(
         row.add("source", str(item.source))
         row.add("destination", str(item.destination))
         row.add("strategy", item.strategy)
+        src_map = storage_binding_to_mapping(item.source_binding)
+        row.add("source_binding", table())
+        for k, v in src_map.items():
+            row["source_binding"].add(k, v)
+        dst_map = storage_binding_to_mapping(item.destination_binding)
+        row.add("destination_binding", table())
+        for k, v in dst_map.items():
+            row["destination_binding"].add(k, v)
         items.add(str(index), row)
     doc.add("items", items)
     text = dumps(doc)
@@ -362,14 +407,23 @@ def _verify(source: Path, destination: Path, mode: VerifyMode) -> None:
 def execute_storage_migration(  # noqa: C901
     plan: StorageMigrationPlan,
     *,
-    mode: MigrationMode = "move",
+    mode: MigrationMode = "copy",
     verify: VerifyMode = "sha256",
     quiescence_check: Callable[[], None] | None = None,
     project_root: Path | None = None,
 ) -> StorageMigrationResult:
     """Execute a previously validated plan with journaled, verified switching."""
     if mode not in {"copy", "move"} or verify not in {"sha256", "size"}:
-        raise StorageMigrationError("unsupported migration mode or verification mode")
+        raise StorageMigrationError(
+            "unsupported migration mode or verification mode",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+        )
+    if mode == "move":
+        raise StorageMigrationError(
+            "mode='move' is disabled in Ledgercore 0.5.1 because source cleanup "
+            "is not safely recoverable; use mode='copy'",
+            code="STORAGE_MIGRATION_MOVE_DISABLED",
+        )
     durable = any(
         item.component == "mount" and item.strategy == "copy" for item in plan.items
     )
@@ -381,7 +435,26 @@ def execute_storage_migration(  # noqa: C901
     journal = _journal_path(plan, root)
     completed = 0
     try:
-        _write_journal(plan, journal, "planned")
+        _write_journal(
+            plan,
+            journal,
+            phase="planned",
+            mode=mode,
+            verify=verify,
+            project_root=root,
+            items_completed=0,
+            source_removed=False,
+        )
+        _write_journal(
+            plan,
+            journal,
+            phase="copying",
+            mode=mode,
+            verify=verify,
+            project_root=root,
+            items_completed=0,
+            source_removed=False,
+        )
         for item in plan.items:
             if item.strategy == "noop":
                 completed += 1
@@ -435,7 +508,26 @@ def execute_storage_migration(  # noqa: C901
                 if staging_root is not None:
                     staging_root.rmdir()
             completed += 1
-            _write_journal(plan, journal, "verified")
+            _write_journal(
+                plan,
+                journal,
+                phase="copying",
+                mode=mode,
+                verify=verify,
+                project_root=root,
+                items_completed=completed,
+                source_removed=False,
+            )
+        _write_journal(
+            plan,
+            journal,
+            phase="verified",
+            mode=mode,
+            verify=verify,
+            project_root=root,
+            items_completed=completed,
+            source_removed=False,
+        )
         if quiescence_check is not None:
             quiescence_check()
         if isinstance(plan.config_changes, LedgerLocalOverrides):
@@ -446,27 +538,42 @@ def execute_storage_migration(  # noqa: C901
             )
         else:
             write_ledger_manifest(root / ".ledger" / "ledger.toml", plan.config_changes)
-        _write_journal(plan, journal, "config-switched")
-        removed = False
-        if mode == "move":
-            for item in plan.items:
-                if (
-                    item.strategy == "copy"
-                    and item.source.exists()
-                    and item.source != item.destination
-                ):
-                    if item.component == "config":
-                        item.source.unlink()
-                    else:
-                        shutil.rmtree(item.source)
-            removed = True
-        _write_journal(plan, journal, "complete")
+        _write_journal(
+            plan,
+            journal,
+            phase="config-switched",
+            mode=mode,
+            verify=verify,
+            project_root=root,
+            items_completed=completed,
+            source_removed=False,
+        )
+        _write_journal(
+            plan,
+            journal,
+            phase="complete",
+            mode=mode,
+            verify=verify,
+            project_root=root,
+            items_completed=completed,
+            source_removed=False,
+        )
         return StorageMigrationResult(
-            plan.migration_id, "complete", completed, removed, journal
+            plan.migration_id, "complete", completed, False, journal
         )
     except Exception as exc:
         try:
-            _write_journal(plan, journal, "failed", str(exc))
+            _write_journal(
+                plan,
+                journal,
+                phase="failed",
+                mode=mode,
+                verify=verify,
+                project_root=root,
+                items_completed=completed,
+                source_removed=False,
+                error=str(exc),
+            )
         except Exception:
             pass
         if isinstance(exc, StorageMigrationError):
@@ -476,57 +583,251 @@ def execute_storage_migration(  # noqa: C901
         ) from exc
 
 
+def _inspect_journal_v1(
+    document: Mapping[str, object],
+    journal_path: Path,
+) -> StorageMigrationJournal:
+    """Inspect a schema-1 journal, preserving only known facts."""
+    migration_id = str(document["migration_id"])
+    phase = str(document["phase"])
+    project_uuid = str(document["project_uuid"])
+    error_raw = document.get("error")
+    error = str(error_raw) if error_raw is not None else None
+    items_data = document.get("items", {})
+    journal_items: list[StorageMigrationJournalItem] = []
+    for index, row in enumerate(items_data.values()):  # type: ignore[attr-defined]
+        journal_items.append(
+            StorageMigrationJournalItem(
+                item_id=str(index),
+                component=row["component"],
+                tool_name=row["tool"],
+                mount_name=row["mount"],
+                source=Path(row["source"]),
+                destination=Path(row["destination"]),
+                strategy=row["strategy"],
+                source_binding=None,
+                destination_binding=None,
+            )
+        )
+    # Schema-1: bindings, mode, verify, project_root are unknown
+    items_completed: int | None = None
+    if phase == "complete":
+        items_completed = len(journal_items)
+    recovery_capability: MigrationRecoveryCapability
+    if phase == "complete":
+        recovery_capability = "completed-only"
+    else:
+        recovery_capability = "manual-intervention"
+    return StorageMigrationJournal(
+        migration_id=migration_id,
+        phase=phase,
+        project_uuid=project_uuid,
+        journal_path=journal_path,
+        items=tuple(journal_items),
+        error=error,
+        schema_version=1,
+        mode=None,
+        verify=None,
+        project_root=None,
+        items_completed=items_completed,
+        source_removed=None,
+        recovery_capability=recovery_capability,
+    )
+
+
+def _inspect_journal_v2(
+    document: Mapping[str, object],
+    journal_path: Path,
+) -> StorageMigrationJournal:
+    """Strictly inspect a schema-2 journal."""
+    migration_id_raw = document.get("migration_id")
+    if not migration_id_raw:
+        raise StorageMigrationError(
+            "schema-2 journal missing migration_id",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    migration_id = str(migration_id_raw)
+    phase_raw = document.get("phase")
+    if not phase_raw:
+        raise StorageMigrationError(
+            "schema-2 journal missing phase",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    phase = str(phase_raw)
+    project_uuid_raw = document.get("project_uuid")
+    if not project_uuid_raw:
+        raise StorageMigrationError(
+            "schema-2 journal missing project_uuid",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    project_uuid = str(project_uuid_raw)
+    error_raw = document.get("error")
+    error = str(error_raw) if error_raw is not None else None
+    mode_raw = document.get("mode")
+    if mode_raw not in ("copy", "move"):
+        raise StorageMigrationError(
+            f"schema-2 journal has invalid mode {mode_raw!r}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    mode: MigrationMode = mode_raw
+    verify_raw = document.get("verify")
+    if verify_raw not in ("sha256", "size"):
+        raise StorageMigrationError(
+            f"schema-2 journal has invalid verify {verify_raw!r}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    verify: VerifyMode = verify_raw
+    project_root_raw = document.get("project_root")
+    if not project_root_raw:
+        raise StorageMigrationError(
+            "schema-2 journal missing project_root",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    project_root = Path(str(project_root_raw))
+    items_completed_raw = document.get("items_completed")
+    if not isinstance(items_completed_raw, int):
+        raise StorageMigrationError(
+            f"schema-2 journal has non-integer items_completed {items_completed_raw!r}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    source_removed_raw = document.get("source_removed")
+    if not isinstance(source_removed_raw, bool):
+        raise StorageMigrationError(
+            f"schema-2 journal has non-boolean source_removed {source_removed_raw!r}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    items_data = document.get("items")
+    if not hasattr(items_data, "values"):
+        raise StorageMigrationError(
+            "schema-2 journal has non-table items",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    journal_items: list[StorageMigrationJournalItem] = []
+    for key, row in items_data.items():  # type: ignore[attr-defined]
+        src_binding_raw = row.get("source_binding")
+        if not hasattr(src_binding_raw, "get"):
+            raise StorageMigrationError(
+                f"schema-2 journal item {key} missing source_binding",
+                code="STORAGE_MIGRATION_JOURNAL_INVALID",
+            )
+        dst_binding_raw = row.get("destination_binding")
+        if not hasattr(dst_binding_raw, "get"):
+            raise StorageMigrationError(
+                f"schema-2 journal item {key} missing destination_binding",
+                code="STORAGE_MIGRATION_JOURNAL_INVALID",
+            )
+        src_binding = storage_binding_from_mapping(
+            src_binding_raw, source=f"journal item {key} source_binding"
+        )
+        dst_binding = storage_binding_from_mapping(
+            dst_binding_raw, source=f"journal item {key} destination_binding"
+        )
+        journal_items.append(
+            StorageMigrationJournalItem(
+                item_id=str(key),
+                component=row["component"],
+                tool_name=row["tool"],
+                mount_name=row["mount"],
+                source=Path(row["source"]),
+                destination=Path(row["destination"]),
+                strategy=row["strategy"],
+                source_binding=src_binding,
+                destination_binding=dst_binding,
+            )
+        )
+    num_items = len(journal_items)
+    if items_completed_raw < 0 or items_completed_raw > num_items:
+        raise StorageMigrationError(
+            f"schema-2 journal items_completed={items_completed_raw} "
+            f"out of range for {num_items} items",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    recovery_capability: MigrationRecoveryCapability
+    if phase == "complete":
+        recovery_capability = "completed-only"
+    else:
+        recovery_capability = "manual-intervention"
+    return StorageMigrationJournal(
+        migration_id=migration_id,
+        phase=phase,
+        project_uuid=project_uuid,
+        journal_path=journal_path,
+        items=tuple(journal_items),
+        error=error,
+        schema_version=2,
+        mode=mode,
+        verify=verify,
+        project_root=project_root,
+        items_completed=items_completed_raw,
+        source_removed=source_removed_raw,
+        recovery_capability=recovery_capability,
+    )
+
+
 def inspect_storage_migration(journal_path: Path) -> StorageMigrationJournal:
     """Read a migration journal for operator or recovery tooling."""
+    if journal_path.is_symlink() or not journal_path.is_file():
+        raise StorageMigrationError(
+            f"migration journal {journal_path} is missing or is not a regular file",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
     try:
         document = parse(journal_path.read_text(encoding="utf-8"))
-        items: list[StorageMigrationItem] = []
-        for row in document.get("items", {}).values():
-            binding = StorageBinding(
-                1,
-                3,
-                document["project_uuid"],
-                None,
-                row["tool"],
-                row["mount"],
-                "project",
-            )
-            items.append(
-                StorageMigrationItem(
-                    row["component"],
-                    row["tool"],
-                    row["mount"],
-                    Path(row["source"]),
-                    Path(row["destination"]),
-                    binding,
-                    binding,
-                    row["strategy"],
-                )
-            )
-        return StorageMigrationJournal(
-            document["migration_id"],
-            document["phase"],
-            document["project_uuid"],
-            journal_path,
-            tuple(items),
-            document.get("error"),
-        )
     except Exception as exc:
         raise StorageMigrationError(
-            f"unable to inspect migration journal {journal_path}: {exc}"
+            f"unable to read migration journal {journal_path}: {exc}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        ) from exc
+    if not hasattr(document, "get"):
+        raise StorageMigrationError(
+            f"migration journal {journal_path} is not a TOML table",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    schema_raw = document.get("schema_version")
+    if not isinstance(schema_raw, int):
+        raise StorageMigrationError(
+            f"migration journal {journal_path} has non-integer schema_version",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    try:
+        if schema_raw == 1:
+            return _inspect_journal_v1(document, journal_path)
+        elif schema_raw == 2:
+            return _inspect_journal_v2(document, journal_path)
+        else:
+            raise StorageMigrationError(
+                f"migration journal {journal_path} has unsupported schema {schema_raw}",
+                code="STORAGE_MIGRATION_JOURNAL_INVALID",
+            )
+    except StorageMigrationError:
+        raise
+    except Exception as exc:
+        raise StorageMigrationError(
+            f"unable to inspect migration journal {journal_path}: {exc}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
         ) from exc
 
 
-def recover_storage_migration(journal_path: Path) -> StorageMigrationResult:
-    """Return the durable result of a completed journal or refuse failed recovery."""
+def recover_storage_migration(
+    journal_path: Path,
+) -> StorageMigrationResult:
+    """Return completed journal result or refuse incomplete recovery."""
     journal = inspect_storage_migration(journal_path)
     if journal.phase == "complete":
         return StorageMigrationResult(
-            journal.migration_id, journal.phase, len(journal.items), True, journal_path
+            journal.migration_id,
+            journal.phase,
+            journal.items_completed
+            if journal.items_completed is not None
+            else len(journal.items),
+            journal.source_removed,
+            journal_path,
         )
     raise StorageMigrationError(
         f"migration journal {journal_path} is in phase {journal.phase}; "
-        "recovery requires the original plan"
+        "Ledgercore 0.5.1 can inspect this journal but cannot "
+        "safely resume it automatically",
+        code="STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED",
     )
 
 
@@ -562,8 +863,10 @@ def plan_schema_v2_to_v3(loaded: Any) -> Any:
 
 
 __all__ = [
+    "MigrationRecoveryCapability",
     "StorageMigrationItem",
     "StorageMigrationJournal",
+    "StorageMigrationJournalItem",
     "StorageMigrationPlan",
     "StorageMigrationResult",
     "execute_storage_migration",

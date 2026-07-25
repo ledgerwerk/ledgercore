@@ -213,11 +213,11 @@ Pure path helpers derive `.ledger/<tool>/config.toml`, project mounts, external 
 
 ## `ledgercore.storage_binding`
 
-`StorageBinding` describes a `.ledger-project.toml` marker. `initialize_storage_binding`, `initialize_config_binding`, `read_storage_binding`, `write_storage_binding`, `validate_storage_binding`, and `validate_ledger_layout_storage` provide explicit marker lifecycle and read-only validation. `initialize_external_store` and `validate_external_store` manage `.ledger-store.toml`.
+`StorageBinding` describes a `.ledger-project.toml` marker. `initialize_storage_binding`, `initialize_config_binding`, `read_storage_binding`, `write_storage_binding`, `validate_storage_binding`, and `validate_ledger_layout_storage` provide explicit marker lifecycle and read-only validation. `storage_binding_to_mapping` and `storage_binding_from_mapping` convert bindings to and from plain mappings for serialization in journals. `initialize_external_store` and `validate_external_store` manage `.ledger-store.toml`.
 
 ## `ledgercore.migration`
 
-`plan_storage_migration` resolves source and target layouts without writes. `execute_storage_migration` performs verified copy or cache rebuild with temporary destinations, a downstream quiescence callback, atomic configuration switching, cleanup, and a journal. `inspect_storage_migration` reads a journal; `recover_storage_migration` reports completed migrations. `plan_schema_v2_to_v3` provides conservative schema conversion.
+`plan_storage_migration` resolves source and target layouts without writes. `execute_storage_migration` performs verified copy-only activation with temporary destinations, a downstream quiescence callback, atomic configuration switching, and a schema-2 journal. Destructive `mode="move"` is disabled in 0.5.1. `inspect_storage_migration` reads schema-1 and schema-2 journals; schema-1 journals have bindings set to `None`. `recover_storage_migration` returns completed journal results (`source_removed=False` for schema-2 copy, `source_removed=None` for schema-1) and raises `STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED` for incomplete journals. `plan_schema_v2_to_v3` provides conservative schema conversion.
 
 ## `ledgercore.layout` compatibility facade
 

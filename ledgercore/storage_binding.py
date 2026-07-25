@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,28 +60,48 @@ def _int(value: Any, field: str) -> int:
     return value
 
 
-def _parse_binding(document: Any, path: Path) -> StorageBinding:
-    if not hasattr(document, "get"):
-        raise StorageBindingError(f"binding marker {path} must contain a TOML table")
-    schema = _int(document.get("schema_version"), f"{path}: schema_version")
-    layout = _int(document.get("layout_version"), f"{path}: layout_version")
+def storage_binding_to_mapping(
+    binding: StorageBinding,
+) -> dict[str, object]:
+    """Convert a StorageBinding to a plain mapping for serialization."""
+    result: dict[str, object] = {
+        "schema_version": binding.schema_version,
+        "layout_version": binding.layout_version,
+        "project_uuid": binding.project_uuid,
+        "tool": binding.tool,
+        "mount": binding.mount,
+        "storage": binding.storage,
+    }
+    if binding.project_name is not None:
+        result["project_name"] = binding.project_name
+    return result
+
+
+def storage_binding_from_mapping(
+    value: Mapping[str, object],
+    *,
+    source: str,
+) -> StorageBinding:
+    """Parse a StorageBinding from a plain mapping with full validation."""
+    schema = _int(value.get("schema_version"), f"{source}: schema_version")
+    layout = _int(value.get("layout_version"), f"{source}: layout_version")
     if schema != 1 or layout != 3:
         raise StorageBindingError(
-            f"binding marker {path} has unsupported schema/layout {schema}/{layout}; "
+            f"{source} has unsupported schema/layout {schema}/{layout}; "
             "initialize it explicitly for Ledgercore layout 3"
         )
-    project_uuid = _string(document.get("project_uuid"), f"{path}: project_uuid")
-    project_name_value = document.get("project_name")
+    project_uuid = _string(value.get("project_uuid"), f"{source}: project_uuid")
+    project_name_raw = value.get("project_name")
     project_name = (
         None
-        if project_name_value is None
-        else _string(project_name_value, f"{path}: project_name")
+        if project_name_raw is None
+        else _string(project_name_raw, f"{source}: project_name")
     )
-    tool = _string(document.get("tool"), f"{path}: tool")
-    mount = _string(document.get("mount"), f"{path}: mount")
-    storage = _string(document.get("storage"), f"{path}: storage")
+    tool = _string(value.get("tool"), f"{source}: tool")
+    mount = _string(value.get("mount"), f"{source}: mount")
+    storage = _string(value.get("storage"), f"{source}: storage")
     if storage not in {"project", "external", "user-data", "cache"}:
-        raise StorageBindingError(f"{path}: unsupported storage {storage!r}")
+        raise StorageBindingError(f"{source}: unsupported storage {storage!r}")
     return StorageBinding(
         schema_version=schema,
         layout_version=layout,
@@ -90,6 +111,12 @@ def _parse_binding(document: Any, path: Path) -> StorageBinding:
         mount=mount,
         storage=cast(BindingStorage, storage),
     )
+
+
+def _parse_binding(document: Any, path: Path) -> StorageBinding:
+    if not hasattr(document, "get"):
+        raise StorageBindingError(f"binding marker {path} must contain a TOML table")
+    return storage_binding_from_mapping(document, source=str(path))
 
 
 def read_storage_binding(path: Path) -> StorageBinding:
@@ -119,14 +146,8 @@ def write_storage_binding(path: Path, binding: StorageBinding) -> None:
     """Atomically write a binding marker."""
     marker = _marker_path(path)
     doc = table()
-    doc.add("schema_version", binding.schema_version)
-    doc.add("layout_version", binding.layout_version)
-    doc.add("project_uuid", binding.project_uuid)
-    if binding.project_name is not None:
-        doc.add("project_name", binding.project_name)
-    doc.add("tool", binding.tool)
-    doc.add("mount", binding.mount)
-    doc.add("storage", binding.storage)
+    for key, value in storage_binding_to_mapping(binding).items():
+        doc.add(key, value)
     text = dumps(doc)
     if not text.endswith("\n"):
         text += "\n"
@@ -368,6 +389,8 @@ __all__ = [
     "initialize_external_store",
     "initialize_storage_binding",
     "read_storage_binding",
+    "storage_binding_from_mapping",
+    "storage_binding_to_mapping",
     "validate_external_store",
     "validate_ledger_layout_storage",
     "validate_storage_binding",
