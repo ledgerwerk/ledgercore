@@ -184,6 +184,22 @@ def _overrides_document(overrides: LedgerLocalOverrides) -> Any:
     return doc
 
 
+def render_ledger_manifest(manifest: LedgerProjectManifest) -> str:
+    """Render a schema-3 manifest to TOML string without writing to file."""
+    from tomlkit import dumps
+
+    doc = _manifest_document(manifest)
+    return dumps(doc)
+
+
+def render_ledger_local_config(overrides: LedgerLocalOverrides) -> str:
+    """Render schema-3 local overrides to TOML string without writing to file."""
+    from tomlkit import dumps
+
+    doc = _overrides_document(overrides)
+    return dumps(doc)
+
+
 def write_ledger_local_config(
     path: Path,
     overrides: LedgerLocalOverrides,

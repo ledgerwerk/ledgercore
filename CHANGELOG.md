@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - Unreleased
+
+### Added
+
+- Added DestinationPrecondition dataclass for typed before-state fingerprints
+- Added MigrationPhase and MigrationItemState enums for schema-3 state machine
+- Added Schema3MigrationJournal, Schema3ItemJournalState, Schema3ConfigSwitchState dataclasses
+- Added write_schema3_journal and \_parse_schema3_journal for schema-3 TOML persistence
+- Added StorageMigrationHooks for lifecycle callbacks (quiescence, staged/activated validation, finalize)
+- Added MigrationLock for advisory project migration locking
+- Added \_check_same_filesystem and \_validate_same_filesystem for cross-filesystem detection
+- Added \_durable_rename for fsync-backed atomic renames
+- Added render_ledger_manifest and render_ledger_local_config for pure TOML rendering
+- Added strict plan-structure validation (\_validate_plan_structure) for migration_id, policies, strategies, kinds
+- Added stage/backup collision detection in \_check_path_overlaps
+- Added source fingerprint population during planning
+
+### Changed
+
+- File fingerprints (sha256-file-v1) are now path-independent (content hash only, no filename)
+- Fingerprint failures now fail closed: state='invalid' instead of 'owned' with missing fingerprint
+- Config inspection now checks parent binding even when file is absent
+- noop-if-exact now compares against expected_target_fingerprint (not before-state)
+- replace-owned now uses expected_before.fingerprint for before-state validation
+- Executor now calls validate_storage_migration_plan before first journal write
+
+### Fixed
+
+- Fixed fail-open validation where fingerprint errors allowed owned+replaceable state
+- Fixed missing config file bypassing foreign parent detection
+- Fixed unknown destination policies/strategies falling through to default action
+
 ## [Unreleased]
 
 ## [0.5.1] - Unreleased

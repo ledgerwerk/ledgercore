@@ -9,6 +9,8 @@ import pytest
 
 from ledgercore.errors import StorageMigrationError
 from ledgercore.migration import (
+    DestinationPrecondition,
+    StorageFingerprint,
     StorageMigrationItem,
     StorageMigrationPlan,
     _prepare_item_paths,
@@ -432,7 +434,7 @@ class TestPlanValidation:
         assert any("create-only" in e for e in val.errors)
 
     def test_replace_owned_requires_fingerprint(self, tmp_path: Path) -> None:
-        """replace-owned without expected_destination_fingerprint → conflict."""
+        """replace-owned without expected_before → conflict."""
         dest = tmp_path / "dest"
         dest.mkdir()
         _write_marker(dest, _binding())
@@ -468,7 +470,7 @@ class TestPlanValidation:
             destination_binding=_binding(),
             strategy="copy",
             destination_policy="replace-owned",
-            expected_destination_fingerprint="sha256-tree-v1:fakehash",
+            expected_before=DestinationPrecondition(state="absent"),
         )
         plan = _make_plan((item,))
         val = validate_storage_migration_plan(plan, project_root=tmp_path)
@@ -493,7 +495,7 @@ class TestPlanValidation:
             destination_binding=_binding(),
             strategy="copy",
             destination_policy="replace-owned",
-            expected_destination_fingerprint=fp.encoded,
+            expected_before=DestinationPrecondition(state="owned", fingerprint=fp),
         )
         plan = _make_plan((item,))
         val = validate_storage_migration_plan(plan, project_root=tmp_path)
@@ -517,7 +519,7 @@ class TestPlanValidation:
             destination_binding=_binding(),
             strategy="copy",
             destination_policy="replace-owned",
-            expected_destination_fingerprint=fp_v1.encoded,
+            expected_before=DestinationPrecondition(state="owned", fingerprint=fp_v1),
         )
         # Mutate destination after fingerprinting
         (dest / "data.txt").write_text("v2", encoding="utf-8")
@@ -544,7 +546,7 @@ class TestPlanValidation:
             destination_binding=_binding(),
             strategy="copy",
             destination_policy="noop-if-exact",
-            expected_destination_fingerprint=fp.encoded,
+            expected_target_fingerprint=fp,
         )
         plan = _make_plan((item,))
         val = validate_storage_migration_plan(plan, project_root=tmp_path)
@@ -567,7 +569,12 @@ class TestPlanValidation:
             destination_binding=_binding(),
             strategy="copy",
             destination_policy="noop-if-exact",
-            expected_destination_fingerprint="sha256-tree-v1:definitelynotmatching",
+            expected_target_fingerprint=StorageFingerprint(
+                algorithm="sha256-tree-v1",
+                digest="definitelynotmatching",
+                file_count=0,
+                total_bytes=0,
+            ),
         )
         plan = _make_plan((item,))
         val = validate_storage_migration_plan(plan, project_root=tmp_path)
@@ -592,7 +599,7 @@ class TestPlanValidation:
             destination_binding=_file_binding(),
             strategy="copy",
             destination_policy="replace-owned",
-            expected_destination_fingerprint=fp.encoded,
+            expected_before=DestinationPrecondition(state="owned", fingerprint=fp),
         )
         plan = _make_plan((item,))
         val = validate_storage_migration_plan(plan, project_root=tmp_path)
@@ -758,6 +765,6 @@ class TestExistingBehaviorPreserved:
             strategy="copy",
         )
         assert item.destination_policy == "create-only"
-        assert item.expected_destination_fingerprint is None
+        assert item.expected_before == DestinationPrecondition(state="absent")
         assert item.expected_source_fingerprint is None
         assert item.destination_kind is None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import uuid
 from collections.abc import Callable, Mapping
@@ -38,23 +39,84 @@ MigrationRecoveryCapability = Literal["completed-only", "manual-intervention"]
 
 DestinationPolicy = Literal["create-only", "replace-owned", "noop-if-exact"]
 DestinationKind = Literal["directory", "file"]
-ItemActivationState = Literal[
+
+# Schema-3 top-level migration phases
+MigrationPhase = Literal[
+    "planned",
+    "staging",
+    "staged",
+    "activating",
+    "items-activated",
+    "config-switching",
+    "config-switched",
+    "post-verifying",
+    "committed",
+    "cleaning-up",
+    "complete",
+    "rolling-back",
+    "rolled-back",
+    "failed",
+]
+
+# Schema-3 per-item states
+MigrationItemState = Literal[
     "pending",
+    "staging",
     "staged",
     "stage-verified",
+    "backup-intent",
     "backup-created",
+    "activation-intent",
     "activated",
     "post-verified",
+    "rollback-intent",
     "rolled-back",
+    "cleanup-pending",
     "complete",
 ]
 
+# Legacy schema-2 phases (kept for backward compatibility)
 _JOURNAL_PHASES = frozenset(
     {"planned", "copying", "verified", "config-switched", "complete", "failed"}
 )
 _JOURNAL_COMPONENTS = frozenset({"config", "mount"})
 _JOURNAL_STRATEGIES = frozenset({"copy", "rebuild", "noop"})
 _DESTINATION_POLICIES = frozenset({"create-only", "replace-owned", "noop-if-exact"})
+
+# Schema-3 valid phase transitions
+_PHASE_TRANSITIONS: dict[str, set[str]] = {
+    "planned": {"staging", "failed", "rolling-back"},
+    "staging": {"staged", "failed", "rolling-back"},
+    "staged": {"activating", "failed", "rolling-back"},
+    "activating": {"items-activated", "failed", "rolling-back"},
+    "items-activated": {"config-switching", "failed", "rolling-back"},
+    "config-switching": {"config-switched", "failed", "rolling-back"},
+    "config-switched": {"post-verifying", "failed", "rolling-back"},
+    "post-verifying": {"committed", "failed", "rolling-back"},
+    "committed": {"cleaning-up", "complete", "failed"},
+    "cleaning-up": {"complete", "failed"},
+    "complete": set(),
+    "rolling-back": {"rolled-back", "failed"},
+    "rolled-back": set(),
+    "failed": set(),
+}
+
+# Schema-3 valid item state transitions
+_ITEM_STATE_TRANSITIONS: dict[str, set[str]] = {
+    "pending": {"staging", "rollback-intent", "cleanup-pending"},
+    "staging": {"staged", "rollback-intent"},
+    "staged": {"stage-verified", "rollback-intent"},
+    "stage-verified": {"backup-intent", "rollback-intent"},
+    "backup-intent": {"backup-created", "rollback-intent"},
+    "backup-created": {"activation-intent", "rollback-intent"},
+    "activation-intent": {"activated", "rollback-intent"},
+    "activated": {"post-verified", "rollback-intent"},
+    "post-verified": {"rollback-intent", "cleanup-pending"},
+    "rollback-intent": {"rolled-back", "cleanup-pending"},
+    "rolled-back": {"cleanup-pending"},
+    "cleanup-pending": {"complete"},
+    "complete": set(),
+}
 
 
 def _journal_invalid(message: str) -> StorageMigrationError:
@@ -248,8 +310,8 @@ def fingerprint_storage_directory(
 def fingerprint_storage_file(path: Path) -> StorageFingerprint:
     """Compute a deterministic sha256-file-v1 fingerprint of a regular file.
 
-    The canonical representation is:
-        F\\0<filename>\\0<size>\\0<sha256>
+    The canonical representation is path-independent:
+        F\\0<size>\\0<content-sha256>
     """
     if not path.exists():
         raise StorageMigrationError(f"fingerprint target {path} does not exist")
@@ -258,7 +320,7 @@ def fingerprint_storage_file(path: Path) -> StorageFingerprint:
     raw = path.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     hasher = hashlib.sha256()
-    hasher.update(f"F\0{path.name}\0{len(raw)}\0{digest}".encode())
+    hasher.update(f"F\\0{len(raw)}\\0{digest}".encode())
     return StorageFingerprint(
         algorithm="sha256-file-v1",
         digest=hasher.hexdigest(),
@@ -366,8 +428,15 @@ def _inspect_directory_destination(
     # Owned — compute fingerprint of content (excluding marker)
     try:
         fp = fingerprint_storage_directory(path)
-    except StorageMigrationError:
-        fp = None
+    except StorageMigrationError as exc:
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="directory",
+            binding=actual,
+            fingerprint=None,
+            error=f"fingerprint failed: {exc}",
+        )
     return StorageDestinationInspection(
         state="owned",
         path=path,
@@ -381,13 +450,53 @@ def _inspect_config_destination(
     path: Path,
     expected_binding: StorageBinding,
 ) -> StorageDestinationInspection:
-    """Classify a config file destination."""
+    """Classify a config file destination.
+
+    Inspects parent binding even when file is absent.
+    """
+    parent = path.parent
+    marker = parent / ".ledger-project.toml"
+
+    # Check parent binding first, even if file is absent
+    parent_binding: StorageBinding | None = None
+    if marker.is_file() and not marker.is_symlink():
+        try:
+            parent_binding = read_storage_binding(marker)
+        except StorageBindingError:
+            parent_binding = None
+
     if not path.exists():
+        if parent_binding is None:
+            # No parent marker or invalid marker
+            if marker.exists():
+                return StorageDestinationInspection(
+                    state="invalid",
+                    path=path,
+                    kind="file",
+                    binding=None,
+                    fingerprint=None,
+                    error=f"parent {parent} has invalid binding marker",
+                )
+            return StorageDestinationInspection(
+                state="absent",
+                path=path,
+                kind="file",
+                binding=None,
+                fingerprint=None,
+            )
+        if storage_bindings_match(parent_binding, expected_binding):
+            return StorageDestinationInspection(
+                state="absent",
+                path=path,
+                kind="file",
+                binding=parent_binding,
+                fingerprint=None,
+            )
         return StorageDestinationInspection(
-            state="absent",
+            state="foreign",
             path=path,
             kind="file",
-            binding=None,
+            binding=parent_binding,
             fingerprint=None,
         )
     if path.is_symlink() or not path.is_file():
@@ -399,10 +508,8 @@ def _inspect_config_destination(
             fingerprint=None,
             error=f"{path} is not a regular file",
         )
-    # Validate parent binding
-    parent = path.parent
-    marker = parent / ".ledger-project.toml"
-    if not marker.is_file() or marker.is_symlink():
+    # For existing file, use already-resolved parent binding
+    if parent_binding is None:
         return StorageDestinationInspection(
             state="invalid",
             path=path,
@@ -411,36 +518,40 @@ def _inspect_config_destination(
             fingerprint=None,
             error=f"parent {parent} has no valid binding marker",
         )
-    try:
-        actual = read_storage_binding(marker)
-    except StorageBindingError as exc:
-        return StorageDestinationInspection(
-            state="invalid",
-            path=path,
-            kind="file",
-            binding=None,
-            fingerprint=None,
-            error=str(exc),
-        )
-    if not storage_bindings_match(actual, expected_binding):
+    if not storage_bindings_match(parent_binding, expected_binding):
         return StorageDestinationInspection(
             state="foreign",
             path=path,
             kind="file",
-            binding=actual,
+            binding=parent_binding,
             fingerprint=None,
         )
     try:
         fp = fingerprint_storage_file(path)
-    except StorageMigrationError:
-        fp = None
+    except StorageMigrationError as exc:
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="file",
+            binding=parent_binding,
+            fingerprint=None,
+            error=f"fingerprint failed: {exc}",
+        )
     return StorageDestinationInspection(
         state="owned",
         path=path,
         kind="file",
-        binding=actual,
+        binding=parent_binding,
         fingerprint=fp,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class DestinationPrecondition:
+    """Expected state of a migration destination before activation."""
+
+    state: Literal["absent", "empty-unbound", "owned"]
+    fingerprint: StorageFingerprint | None = None
 
 
 @dataclass(frozen=True)
@@ -454,8 +565,9 @@ class StorageMigrationItem:
     destination_binding: StorageBinding
     strategy: MigrationStrategy
     destination_policy: DestinationPolicy = "create-only"
-    expected_destination_fingerprint: str | None = None
-    expected_source_fingerprint: str | None = None
+    expected_source_fingerprint: StorageFingerprint | None = None
+    expected_before: DestinationPrecondition = DestinationPrecondition(state="absent")
+    expected_target_fingerprint: StorageFingerprint | None = None
     destination_kind: DestinationKind | None = None
 
 
@@ -526,6 +638,61 @@ class StorageMigrationJournal:
     recovery_capability: MigrationRecoveryCapability = "manual-intervention"
 
 
+@dataclass(frozen=True, slots=True)
+class Schema3ItemJournalState:
+    """Per-item journal state for schema-3 migrations."""
+
+    item_index: int
+    component: Literal["config", "mount"]
+    tool_name: str
+    mount_name: str
+    source: Path
+    destination: Path
+    strategy: MigrationStrategy
+    destination_policy: DestinationPolicy
+    state: MigrationItemState = "pending"
+    source_fingerprint: StorageFingerprint | None = None
+    expected_before_fingerprint: StorageFingerprint | None = None
+    expected_target_fingerprint: StorageFingerprint | None = None
+    staged_fingerprint: StorageFingerprint | None = None
+    activated_fingerprint: StorageFingerprint | None = None
+    stage_path: Path | None = None
+    backup_path: Path | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Schema3ConfigSwitchState:
+    """Config switch state for schema-3 migrations."""
+
+    kind: Literal["manifest", "local-overrides"]
+    destination: Path
+    state: Literal["pending", "staged", "activated", "rolled-back"] = "pending"
+    expected_before_fingerprint: StorageFingerprint | None = None
+    target_fingerprint: StorageFingerprint | None = None
+    backup_path: Path | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Schema3MigrationJournal:
+    """Schema-3 migration journal."""
+
+    migration_id: str
+    project_uuid: str
+    phase: MigrationPhase = "planned"
+    mode: MigrationMode = "copy"
+    verify: VerifyMode = "sha256"
+    project_root: Path | None = None
+    items: tuple[Schema3ItemJournalState, ...] = ()
+    config_switches: tuple[Schema3ConfigSwitchState, ...] = ()
+    error: str | None = None
+    requires_staged_validation: bool = False
+    requires_activated_validation: bool = False
+    requires_finalization: bool = False
+    cleanup_warnings: tuple[str, ...] = ()
+
+
 def _binding(layout: Any, mount_name: str, storage: str) -> StorageBinding:
     return StorageBinding(
         schema_version=1,
@@ -536,6 +703,19 @@ def _binding(layout: Any, mount_name: str, storage: str) -> StorageBinding:
         mount=mount_name,
         storage=cast(Literal["project", "external", "user-data", "cache"], storage),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class StorageMigrationHooks:
+    """Hooks for migration lifecycle events."""
+
+    quiescence_check: Callable[[], None] | None = None
+    validate_staged: Callable[[int], None] | None = None
+    validate_activated: Callable[[int], None] | None = None
+    finalize: Callable[[], None] | None = None
+    requires_staged_validation: bool = False
+    requires_activated_validation: bool = False
+    requires_finalization: bool = False
 
 
 def _validate_source(
@@ -646,6 +826,7 @@ def plan_storage_migration(
         if source == destination:
             strategy: MigrationStrategy = "noop"
             actual = source_binding
+            source_fp = None
         else:
             strategy = (
                 "rebuild"
@@ -657,6 +838,11 @@ def plan_storage_migration(
                 or source_binding
             )
             _validate_destination(destination, destination_binding)
+            # Compute source fingerprint for copy strategy
+            if strategy == "copy" and source.is_dir():
+                source_fp = fingerprint_storage_directory(source)
+            else:
+                source_fp = None
         items.append(
             StorageMigrationItem(
                 component="mount",
@@ -667,6 +853,7 @@ def plan_storage_migration(
                 source_binding=actual,
                 destination_binding=destination_binding,
                 strategy=strategy,
+                expected_source_fingerprint=source_fp,
             )
         )
     if include_config:
@@ -680,6 +867,7 @@ def plan_storage_migration(
         destination_binding = _file_binding(target_layout)
         if source == destination:
             strategy = "noop"
+            source_fp = None
         else:
             if not source.is_file() or source.is_symlink():
                 raise StorageMigrationError(
@@ -687,6 +875,7 @@ def plan_storage_migration(
                 )
             _validate_destination(destination.parent, destination_binding)
             strategy = "copy"
+            source_fp = fingerprint_storage_file(source)
         items.insert(
             0,
             StorageMigrationItem(
@@ -698,6 +887,7 @@ def plan_storage_migration(
                 source_binding=source_binding,
                 destination_binding=destination_binding,
                 strategy=strategy,
+                expected_source_fingerprint=source_fp,
             ),
         )
     if any(item.strategy == "rebuild" for item in items):
@@ -785,10 +975,13 @@ def _validate_plan_item(
         elif inspection.state == "absent":
             action = "create"
     elif policy == "replace-owned":
-        if item.expected_destination_fingerprint is None:
+        if (
+            item.expected_before.state != "owned"
+            or item.expected_before.fingerprint is None
+        ):
             errors.append(
-                f"item {item_index}: replace-owned"
-                " requires expected_destination_fingerprint"
+                f"item {item_index}: replace-owned requires"
+                " expected_before.state='owned' and expected_before.fingerprint"
             )
             action = "conflict"
         elif inspection.state != "owned":
@@ -799,21 +992,20 @@ def _validate_plan_item(
             action = "conflict"
         elif (
             dest_fp is not None
-            and dest_fp.encoded != item.expected_destination_fingerprint
+            and dest_fp.encoded != item.expected_before.fingerprint.encoded
         ):
             errors.append(
                 f"item {item_index}: destination fingerprint changed; "
-                f"expected {item.expected_destination_fingerprint}, "
+                f"expected {item.expected_before.fingerprint.encoded}, "
                 f"actual {dest_fp.encoded}"
             )
             action = "conflict"
         else:
             action = "replace"
     elif policy == "noop-if-exact":
-        if item.expected_destination_fingerprint is None:
+        if item.expected_target_fingerprint is None:
             errors.append(
-                f"item {item_index}: noop-if-exact"
-                " requires expected_destination_fingerprint"
+                f"item {item_index}: noop-if-exact requires expected_target_fingerprint"
             )
             action = "conflict"
         elif inspection.state == "absent":
@@ -823,7 +1015,7 @@ def _validate_plan_item(
             action = "conflict"
         elif (
             dest_fp is not None
-            and dest_fp.encoded == item.expected_destination_fingerprint
+            and dest_fp.encoded == item.expected_target_fingerprint.encoded
         ):
             action = "noop"
         else:
@@ -889,6 +1081,100 @@ def _check_path_overlaps(
         if resolved == resolved_root / ".ledger":
             errors.append(f"item {i}: destination is the .ledger directory")
 
+    # Check stage/backup path collisions
+    all_generated: list[tuple[str, int, Path]] = []
+    for i, item in enumerate(items):
+        item_paths = _prepare_item_paths(item.destination, migration_id, i)
+        all_generated.append(("stage", i, item_paths.stage.resolve()))
+        all_generated.append(("backup", i, item_paths.backup.resolve()))
+
+    for a_idx, (a_kind, a_item, a_path) in enumerate(all_generated):
+        for b_kind, b_item, b_path in all_generated[a_idx + 1 :]:
+            if a_path == b_path:
+                errors.append(
+                    f"{a_kind} path for item {a_item} conflicts with"
+                    f" {b_kind} path for item {b_item}: {a_path}"
+                )
+            elif a_path.is_relative_to(b_path) or b_path.is_relative_to(a_path):
+                errors.append(
+                    f"{a_kind} path for item {a_item} overlaps with"
+                    f" {b_kind} path for item {b_item}: {a_path} vs {b_path}"
+                )
+
+    return tuple(errors)
+
+
+def _validate_plan_structure(
+    plan: StorageMigrationPlan,
+) -> tuple[str, ...]:
+    """Validate plan structure before filesystem inspection.
+
+    Returns error messages for structural issues.
+    """
+    errors: list[str] = []
+
+    # Validate migration_id (must be a valid hex string, no path separators)
+    if not plan.migration_id:
+        errors.append("migration_id is empty")
+    elif "/" in plan.migration_id or "\\" in plan.migration_id:
+        errors.append(f"migration_id contains path separators: {plan.migration_id!r}")
+    elif len(plan.migration_id) < 8:
+        errors.append(f"migration_id is too short: {plan.migration_id!r}")
+
+    # Validate project_uuid
+    if not plan.project_uuid:
+        errors.append("project_uuid is empty")
+
+    # Validate each item structure
+    seen_identities: set[tuple[str, str, str]] = set()
+    for i, item in enumerate(plan.items):
+        # Validate component
+        if item.component not in ("config", "mount"):
+            errors.append(f"item {i}: unknown component {item.component!r}")
+
+        # Validate strategy
+        if item.strategy not in ("copy", "rebuild", "noop"):
+            errors.append(f"item {i}: unknown strategy {item.strategy!r}")
+
+        # Validate destination_policy
+        if item.destination_policy not in (
+            "create-only",
+            "replace-owned",
+            "noop-if-exact",
+        ):
+            errors.append(
+                f"item {i}: unknown destination_policy {item.destination_policy!r}"
+            )
+
+        # Validate destination_kind if set
+        if item.destination_kind is not None and item.destination_kind not in (
+            "directory",
+            "file",
+        ):
+            errors.append(
+                f"item {i}: unknown destination_kind {item.destination_kind!r}"
+            )
+
+        # Validate tool_name and mount_name are not empty
+        if not item.tool_name:
+            errors.append(f"item {i}: tool_name is empty")
+        if not item.mount_name:
+            errors.append(f"item {i}: mount_name is empty")
+
+        # Check for duplicate identities
+        identity = (item.component, item.tool_name, item.mount_name)
+        if identity in seen_identities:
+            errors.append(f"item {i}: duplicate identity {identity}")
+        seen_identities.add(identity)
+
+        # Validate paths are absolute
+        if not item.source.is_absolute():
+            errors.append(f"item {i}: source path is not absolute: {item.source}")
+        if not item.destination.is_absolute():
+            errors.append(
+                f"item {i}: destination path is not absolute: {item.destination}"
+            )
+
     return tuple(errors)
 
 
@@ -905,6 +1191,10 @@ def validate_storage_migration_plan(
     root = (project_root or Path.cwd()).resolve(strict=False)
     all_errors: list[str] = []
     item_validations: list[StorageMigrationItemValidation] = []
+
+    # Validate plan structure first (before filesystem inspection)
+    structure_errors = _validate_plan_structure(plan)
+    all_errors.extend(structure_errors)
 
     # Validate each item
     for i, item in enumerate(plan.items):
@@ -934,6 +1224,62 @@ def _hash_tree(path: Path) -> dict[str, str]:
             digest = hashlib.sha256(child.read_bytes()).hexdigest()
             values[child.relative_to(path).as_posix()] = digest
     return values
+
+
+def _check_same_filesystem(path_a: Path, path_b: Path) -> bool:
+    """Check if two paths are on the same filesystem."""
+    try:
+        stat_a = path_a.stat()
+        stat_b = path_b.stat()
+        return stat_a.st_dev == stat_b.st_dev
+    except OSError:
+        return False
+
+
+def _validate_same_filesystem(
+    destination: Path,
+    stage: Path,
+    backup: Path,
+    item_index: int,
+) -> None:
+    """Validate that destination, stage, and backup are on the same filesystem.
+
+    Raises StorageMigrationError if cross-filesystem activation would be required.
+    """
+    dest_parent = destination.parent
+    stage_parent = stage.parent
+    backup_parent = backup.parent
+
+    if not _check_same_filesystem(dest_parent, stage_parent):
+        raise StorageMigrationError(
+            f"item {item_index}: stage path {stage} is on a different filesystem"
+            f" than destination {destination}",
+            code="STORAGE_MIGRATION_CROSS_FILESYSTEM",
+        )
+    if not _check_same_filesystem(dest_parent, backup_parent):
+        raise StorageMigrationError(
+            f"item {item_index}: backup path {backup} is on a different filesystem"
+            f" than destination {destination}",
+            code="STORAGE_MIGRATION_CROSS_FILESYSTEM",
+        )
+
+
+def _durable_rename(source: Path, destination: Path) -> None:
+    """Perform a durable rename with directory fsync.
+
+    This ensures the rename is persisted to disk, including the parent directory.
+    """
+    source.rename(destination)
+    # Fsync the parent directory to ensure the rename is durable
+    try:
+        parent_fd = os.open(str(destination.parent), os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except OSError:
+        # Best-effort: some filesystems may not support directory fsync
+        pass
 
 
 def _copy_tree(source: Path, destination: Path) -> None:
@@ -1055,6 +1401,309 @@ def _write_journal(
     atomic_write_text(path, text)
 
 
+def _fingerprint_to_toml(fp: StorageFingerprint | None) -> dict[str, Any] | None:
+    """Convert a StorageFingerprint to a TOML-compatible dict."""
+    if fp is None:
+        return None
+    return {
+        "algorithm": fp.algorithm,
+        "digest": fp.digest,
+        "file_count": fp.file_count,
+        "total_bytes": fp.total_bytes,
+    }
+
+
+def _fingerprint_from_toml(data: dict[str, Any] | None) -> StorageFingerprint | None:
+    """Parse a StorageFingerprint from a TOML dict."""
+    if data is None:
+        return None
+    return StorageFingerprint(
+        algorithm=data["algorithm"],
+        digest=data["digest"],
+        file_count=data["file_count"],
+        total_bytes=data["total_bytes"],
+    )
+
+
+def _serialize_journal_item(item: Schema3ItemJournalState) -> Any:
+    """Serialize a single migration journal item to a TOML table."""
+    row = table()
+    row.add("item_index", item.item_index)
+    row.add("component", item.component)
+    row.add("tool_name", item.tool_name)
+    row.add("mount_name", item.mount_name)
+    row.add("source", str(item.source))
+    row.add("destination", str(item.destination))
+    row.add("strategy", item.strategy)
+    row.add("destination_policy", item.destination_policy)
+    row.add("state", item.state)
+
+    if item.source_fingerprint is not None:
+        row.add("source_fingerprint", _fingerprint_to_toml(item.source_fingerprint))
+    if item.expected_before_fingerprint is not None:
+        row.add(
+            "expected_before_fingerprint",
+            _fingerprint_to_toml(item.expected_before_fingerprint),
+        )
+    if item.expected_target_fingerprint is not None:
+        row.add(
+            "expected_target_fingerprint",
+            _fingerprint_to_toml(item.expected_target_fingerprint),
+        )
+    if item.staged_fingerprint is not None:
+        row.add("staged_fingerprint", _fingerprint_to_toml(item.staged_fingerprint))
+    if item.activated_fingerprint is not None:
+        row.add(
+            "activated_fingerprint",
+            _fingerprint_to_toml(item.activated_fingerprint),
+        )
+    if item.stage_path is not None:
+        row.add("stage_path", str(item.stage_path))
+    if item.backup_path is not None:
+        row.add("backup_path", str(item.backup_path))
+    if item.error is not None:
+        row.add("error", item.error)
+    return row
+
+
+def _serialize_config_switch(sw: Schema3ConfigSwitchState) -> Any:
+    """Serialize a single config switch to a TOML table."""
+    row = table()
+    row.add("kind", sw.kind)
+    row.add("destination", str(sw.destination))
+    row.add("state", sw.state)
+    if sw.expected_before_fingerprint is not None:
+        row.add(
+            "expected_before_fingerprint",
+            _fingerprint_to_toml(sw.expected_before_fingerprint),
+        )
+    if sw.target_fingerprint is not None:
+        row.add("target_fingerprint", _fingerprint_to_toml(sw.target_fingerprint))
+    if sw.backup_path is not None:
+        row.add("backup_path", str(sw.backup_path))
+    if sw.error is not None:
+        row.add("error", sw.error)
+    return row
+
+
+def write_schema3_journal(
+    journal: Schema3MigrationJournal,
+    path: Path,
+) -> None:
+    """Write a schema-3 migration journal to a TOML file."""
+    doc = table()
+    doc.add("schema_version", 3)
+    doc.add("migration_id", journal.migration_id)
+    doc.add("project_uuid", journal.project_uuid)
+    doc.add("phase", journal.phase)
+    doc.add("mode", journal.mode)
+    doc.add("verify", journal.verify)
+    if journal.project_root is not None:
+        doc.add("project_root", str(journal.project_root))
+    if journal.error is not None:
+        doc.add("error", journal.error)
+    doc.add("requires_staged_validation", journal.requires_staged_validation)
+    doc.add("requires_activated_validation", journal.requires_activated_validation)
+    doc.add("requires_finalization", journal.requires_finalization)
+    if journal.cleanup_warnings:
+        warnings = table()
+        for i, w in enumerate(journal.cleanup_warnings):
+            warnings.add(str(i), w)
+        doc.add("cleanup_warnings", warnings)
+
+    # Write items
+    items = table()
+    for item in journal.items:
+        items.add(str(item.item_index), _serialize_journal_item(item))
+    doc.add("items", items)
+
+    # Write config switches
+    if journal.config_switches:
+        switches = table()
+        for i, sw in enumerate(journal.config_switches):
+            switches.add(str(i), _serialize_config_switch(sw))
+        doc.add("config_switches", switches)
+
+    text = dumps(doc)
+    if not text.endswith("\n"):
+        text += "\n"
+    atomic_write_text(path, text)
+
+
+def _parse_schema3_journal(
+    document: Mapping[str, object],
+    journal_path: Path,
+) -> Schema3MigrationJournal:
+    """Parse a schema-3 migration journal from a TOML document."""
+    context = f"schema-3 journal {journal_path}"
+
+    migration_id = _journal_string(document, "migration_id", context=context)
+    project_uuid = _journal_string(document, "project_uuid", context=context)
+    phase = _journal_string(document, "phase", context=context)
+    mode = _journal_string(document, "mode", context=context)
+    verify = _journal_string(document, "verify", context=context)
+
+    # Validate phase
+    valid_phases = set(MigrationPhase.__args__)  # type: ignore[attr-defined]
+    if phase not in valid_phases:
+        raise _journal_invalid(f"{context}: invalid phase {phase!r}")
+
+    # Parse project_root
+    project_root_raw = document.get("project_root")
+    project_root = Path(str(project_root_raw)) if project_root_raw is not None else None
+
+    # Parse error
+    error = document.get("error")
+    if error is not None and not isinstance(error, str):
+        raise _journal_invalid(f"{context}: error must be a string")
+
+    # Parse hook requirements
+    requires_staged = bool(document.get("requires_staged_validation", False))
+    requires_activated = bool(document.get("requires_activated_validation", False))
+    requires_final = bool(document.get("requires_finalization", False))
+
+    # Parse cleanup warnings
+    cleanup_warnings: list[str] = []
+    warnings_raw = document.get("cleanup_warnings")
+    if isinstance(warnings_raw, Mapping):
+        for i in sorted(warnings_raw.keys(), key=int):
+            cleanup_warnings.append(str(warnings_raw[i]))
+
+    # Parse items
+    items_raw = document.get("items", {})
+    if not isinstance(items_raw, Mapping):
+        raise _journal_invalid(f"{context}: items must be a table")
+
+    items: list[Schema3ItemJournalState] = []
+    for key in sorted(items_raw.keys(), key=int):
+        item_raw = items_raw[key]
+        if not isinstance(item_raw, Mapping):
+            raise _journal_invalid(f"{context}: item {key} must be a table")
+
+        item_index = int(item_raw["item_index"])
+        item_state = _journal_string(
+            item_raw, "state", context=f"{context} item {item_index}"
+        )
+        valid_states = set(MigrationItemState.__args__)  # type: ignore[attr-defined]
+        if item_state not in valid_states:
+            raise _journal_invalid(
+                f"{context} item {item_index}: invalid state {item_state!r}"
+            )
+
+        items.append(
+            Schema3ItemJournalState(
+                item_index=item_index,
+                component=cast(
+                    Literal["config", "mount"],
+                    _journal_string(
+                        item_raw, "component", context=f"{context} item {item_index}"
+                    ),
+                ),
+                tool_name=_journal_string(
+                    item_raw, "tool_name", context=f"{context} item {item_index}"
+                ),
+                mount_name=_journal_string(
+                    item_raw, "mount_name", context=f"{context} item {item_index}"
+                ),
+                source=Path(
+                    _journal_string(
+                        item_raw, "source", context=f"{context} item {item_index}"
+                    )
+                ),
+                destination=Path(
+                    _journal_string(
+                        item_raw, "destination", context=f"{context} item {item_index}"
+                    )
+                ),
+                strategy=_journal_string(
+                    item_raw, "strategy", context=f"{context} item {item_index}"
+                ),  # type: ignore[arg-type]
+                destination_policy=_journal_string(
+                    item_raw,
+                    "destination_policy",
+                    context=f"{context} item {item_index}",
+                ),  # type: ignore[arg-type]
+                state=item_state,  # type: ignore[arg-type]
+                source_fingerprint=_fingerprint_from_toml(
+                    item_raw.get("source_fingerprint")
+                ),
+                expected_before_fingerprint=_fingerprint_from_toml(
+                    item_raw.get("expected_before_fingerprint")
+                ),
+                expected_target_fingerprint=_fingerprint_from_toml(
+                    item_raw.get("expected_target_fingerprint")
+                ),
+                staged_fingerprint=_fingerprint_from_toml(
+                    item_raw.get("staged_fingerprint")
+                ),
+                activated_fingerprint=_fingerprint_from_toml(
+                    item_raw.get("activated_fingerprint")
+                ),
+                stage_path=Path(item_raw["stage_path"])
+                if "stage_path" in item_raw
+                else None,
+                backup_path=Path(item_raw["backup_path"])
+                if "backup_path" in item_raw
+                else None,
+                error=item_raw.get("error"),
+            )
+        )
+
+    # Parse config switches
+    config_switches: list[Schema3ConfigSwitchState] = []
+    switches_raw = document.get("config_switches", {})
+    if isinstance(switches_raw, Mapping):
+        for key in sorted(switches_raw.keys(), key=int):
+            sw_raw = switches_raw[key]
+            if not isinstance(sw_raw, Mapping):
+                raise _journal_invalid(
+                    f"{context}: config_switch {key} must be a table"
+                )
+            config_switches.append(
+                Schema3ConfigSwitchState(
+                    kind=_journal_string(
+                        sw_raw, "kind", context=f"{context} config_switch {key}"
+                    ),  # type: ignore[arg-type]
+                    destination=Path(
+                        _journal_string(
+                            sw_raw,
+                            "destination",
+                            context=f"{context} config_switch {key}",
+                        )
+                    ),
+                    state=_journal_string(
+                        sw_raw, "state", context=f"{context} config_switch {key}"
+                    ),  # type: ignore[arg-type]
+                    expected_before_fingerprint=_fingerprint_from_toml(
+                        sw_raw.get("expected_before_fingerprint")
+                    ),
+                    target_fingerprint=_fingerprint_from_toml(
+                        sw_raw.get("target_fingerprint")
+                    ),
+                    backup_path=Path(sw_raw["backup_path"])
+                    if "backup_path" in sw_raw
+                    else None,
+                    error=sw_raw.get("error"),
+                )
+            )
+
+    return Schema3MigrationJournal(
+        migration_id=migration_id,
+        project_uuid=project_uuid,
+        phase=phase,  # type: ignore[arg-type]
+        mode=mode,  # type: ignore[arg-type]
+        verify=verify,  # type: ignore[arg-type]
+        project_root=project_root,
+        items=tuple(items),
+        config_switches=tuple(config_switches),
+        error=error,
+        requires_staged_validation=requires_staged,
+        requires_activated_validation=requires_activated,
+        requires_finalization=requires_final,
+        cleanup_warnings=tuple(cleanup_warnings),
+    )
+
+
 def _verify(source: Path, destination: Path, mode: VerifyMode) -> None:
     if mode == "size":
         source_size = sum(
@@ -1111,6 +1760,13 @@ def execute_storage_migration(  # noqa: C901
             code="STORAGE_MIGRATION_INVALID_ARGUMENT",
         )
     root = (project_root or Path.cwd()).resolve(strict=False)
+    # Validate plan before any journal write
+    validation = validate_storage_migration_plan(plan, project_root=root)
+    if not validation.valid:
+        raise StorageMigrationError(
+            f"migration plan is invalid: {'; '.join(validation.errors)}",
+            code="STORAGE_MIGRATION_PLAN_INVALID",
+        )
     journal = _journal_path(plan, root)
     completed = 0
     try:
@@ -1532,6 +2188,61 @@ def plan_schema_v2_to_v3(loaded: Any) -> Any:
     return LedgerProjectManifest(
         3, loaded.manifest.project_uuid, loaded.manifest.project_name, ledgers
     )
+
+
+class MigrationLock:
+    """Advisory lock for project migration operations."""
+
+    def __init__(self, project_root: Path, migration_id: str) -> None:
+        self._lock_dir = project_root / ".ledger" / "migrations"
+        self._lock_file = self._lock_dir / "write.lock"
+        self._lock_fd: int | None = None
+        self._migration_id = migration_id
+
+    def acquire(self) -> None:
+        """Acquire the migration lock."""
+        self._lock_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            import fcntl
+
+            self._lock_fd = os.open(str(self._lock_file), os.O_CREAT | os.O_WRONLY)
+            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Write migration_id to lock file for diagnostics
+            os.write(self._lock_fd, self._migration_id.encode())
+            os.fsync(self._lock_fd)
+        except ImportError:
+            # Windows: use msvcrt
+            import msvcrt
+
+            self._lock_fd = os.open(str(self._lock_file), os.O_CREAT | os.O_WRONLY)
+            msvcrt.locking(self._lock_fd, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+        except OSError as exc:
+            raise StorageMigrationError(
+                f"could not acquire migration lock: {exc}",
+                code="STORAGE_MIGRATION_LOCKED",
+            ) from exc
+
+    def release(self) -> None:
+        """Release the migration lock."""
+        if self._lock_fd is not None:
+            try:
+                import fcntl
+
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+            except ImportError:
+                pass
+            try:
+                os.close(self._lock_fd)
+            except OSError:
+                pass
+            self._lock_fd = None
+
+    def __enter__(self) -> MigrationLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.release()
 
 
 __all__ = [
