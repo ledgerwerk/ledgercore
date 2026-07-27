@@ -121,8 +121,6 @@ def _journal_item(
     )
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class StorageFingerprint:
     algorithm: Literal["sha256-tree-v1", "sha256-file-v1"]
@@ -144,7 +142,6 @@ class StorageFingerprintEntry:
     size: int | None
 
 
-
 def _inventory_storage_directory(
     path: Path,
     *,
@@ -156,9 +153,7 @@ def _inventory_storage_directory(
     and special files. Ignores the root .ledger-project.toml marker.
     """
     if not path.exists():
-        raise StorageMigrationError(
-            f"fingerprint target {path} does not exist"
-        )
+        raise StorageMigrationError(f"fingerprint target {path} does not exist")
     if path.is_symlink() or not path.is_dir():
         raise StorageMigrationError(
             f"fingerprint target {path} is not a regular directory"
@@ -185,9 +180,7 @@ def _walk_directory_for_inventory(
         if current == root and child.name in ignored_relative_paths:
             continue
         if child.is_symlink():
-            raise StorageMigrationError(
-                f"fingerprint refuses symlink {child}"
-            )
+            raise StorageMigrationError(f"fingerprint refuses symlink {child}")
         if child.is_dir():
             entries.append(
                 StorageFingerprintEntry(
@@ -210,9 +203,7 @@ def _walk_directory_for_inventory(
                 )
             )
         else:
-            raise StorageMigrationError(
-                f"fingerprint refuses special file {child}"
-            )
+            raise StorageMigrationError(f"fingerprint refuses special file {child}")
 
 
 def fingerprint_storage_directory(
@@ -237,12 +228,12 @@ def fingerprint_storage_directory(
     total_bytes = 0
     for entry in entries:
         if entry.kind == "directory":
-            hasher.update(f"D\0{entry.relative_path}\0".encode("utf-8"))
+            hasher.update(f"D\0{entry.relative_path}\0".encode())
         else:
             assert entry.sha256 is not None
             assert entry.size is not None
             hasher.update(
-                f"F\0{entry.relative_path}\0{entry.size}\0{entry.sha256}\0".encode("utf-8")
+                f"F\0{entry.relative_path}\0{entry.size}\0{entry.sha256}\0".encode()
             )
             file_count += 1
             total_bytes += entry.size
@@ -261,24 +252,19 @@ def fingerprint_storage_file(path: Path) -> StorageFingerprint:
         F\\0<filename>\\0<size>\\0<sha256>
     """
     if not path.exists():
-        raise StorageMigrationError(
-            f"fingerprint target {path} does not exist"
-        )
+        raise StorageMigrationError(f"fingerprint target {path} does not exist")
     if path.is_symlink() or not path.is_file():
-        raise StorageMigrationError(
-            f"fingerprint target {path} is not a regular file"
-        )
+        raise StorageMigrationError(f"fingerprint target {path} is not a regular file")
     raw = path.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     hasher = hashlib.sha256()
-    hasher.update(f"F\0{path.name}\0{len(raw)}\0{digest}".encode("utf-8"))
+    hasher.update(f"F\0{path.name}\0{len(raw)}\0{digest}".encode())
     return StorageFingerprint(
         algorithm="sha256-file-v1",
         digest=hasher.hexdigest(),
         file_count=1,
         total_bytes=len(raw),
     )
-
 
 
 DestinationState = Literal["absent", "empty-unbound", "owned", "foreign", "invalid"]
@@ -456,6 +442,7 @@ def _inspect_config_destination(
         fingerprint=fp,
     )
 
+
 @dataclass(frozen=True)
 class StorageMigrationItem:
     component: Literal["config", "mount"]
@@ -492,7 +479,6 @@ class StorageMigrationPlan:
     items: tuple[StorageMigrationItem, ...]
     config_changes: LedgerLocalOverrides | LedgerProjectManifest
     warnings: tuple[str, ...]
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -725,8 +711,6 @@ def plan_storage_migration(
     )
 
 
-
-
 def _validate_plan_item(
     item: StorageMigrationItem,
     item_index: int,
@@ -757,7 +741,8 @@ def _validate_plan_item(
     ledger_dir = resolved_root / ".ledger"
     if resolved_dest == ledger_dir:
         errors.append(
-            f"item {item_index}: destination {item.destination} is the .ledger directory"
+            f"item {item_index}: destination "
+            f"{item.destination} is the .ledger directory"
         )
         return StorageMigrationItemValidation(
             item_index=item_index,
@@ -772,7 +757,8 @@ def _validate_plan_item(
 
     inspection = inspect_storage_migration_destination(
         path=item.destination,
-        kind=item.destination_kind or ("file" if item.component == "config" else "directory"),
+        kind=item.destination_kind
+        or ("file" if item.component == "config" else "directory"),
         expected_binding=item.destination_binding,
     )
     dest_fp = inspection.fingerprint
@@ -781,13 +767,12 @@ def _validate_plan_item(
 
     if inspection.state == "foreign":
         errors.append(
-            f"item {item_index}: destination is foreign (bound to different project/tool/mount)"
+            f"item {item_index}: destination is foreign"
+            " (bound to different project/tool/mount)"
         )
         action = "conflict"
     elif inspection.state == "invalid":
-        errors.append(
-            f"item {item_index}: destination is invalid: {inspection.error}"
-        )
+        errors.append(f"item {item_index}: destination is invalid: {inspection.error}")
         action = "conflict"
     elif policy == "create-only":
         if inspection.state in ("owned",):
@@ -802,7 +787,8 @@ def _validate_plan_item(
     elif policy == "replace-owned":
         if item.expected_destination_fingerprint is None:
             errors.append(
-                f"item {item_index}: replace-owned requires expected_destination_fingerprint"
+                f"item {item_index}: replace-owned"
+                " requires expected_destination_fingerprint"
             )
             action = "conflict"
         elif inspection.state != "owned":
@@ -811,7 +797,10 @@ def _validate_plan_item(
                 f"got {inspection.state}"
             )
             action = "conflict"
-        elif dest_fp is not None and dest_fp.encoded != item.expected_destination_fingerprint:
+        elif (
+            dest_fp is not None
+            and dest_fp.encoded != item.expected_destination_fingerprint
+        ):
             errors.append(
                 f"item {item_index}: destination fingerprint changed; "
                 f"expected {item.expected_destination_fingerprint}, "
@@ -823,7 +812,8 @@ def _validate_plan_item(
     elif policy == "noop-if-exact":
         if item.expected_destination_fingerprint is None:
             errors.append(
-                f"item {item_index}: noop-if-exact requires expected_destination_fingerprint"
+                f"item {item_index}: noop-if-exact"
+                " requires expected_destination_fingerprint"
             )
             action = "conflict"
         elif inspection.state == "absent":
@@ -831,7 +821,10 @@ def _validate_plan_item(
                 f"item {item_index}: noop-if-exact requires existing destination"
             )
             action = "conflict"
-        elif dest_fp is not None and dest_fp.encoded == item.expected_destination_fingerprint:
+        elif (
+            dest_fp is not None
+            and dest_fp.encoded == item.expected_destination_fingerprint
+        ):
             action = "noop"
         else:
             errors.append(
@@ -875,19 +868,20 @@ def _check_path_overlaps(
             if i >= j:
                 continue
             if dest_a == dest_b:
-                errors.append(
-                    f"items {i} and {j} have the same destination {dest_a}"
-                )
+                errors.append(f"items {i} and {j} have the same destination {dest_a}")
             elif dest_a.is_relative_to(dest_b):
                 errors.append(
-                    f"item {i} destination {dest_a} is inside item {j} destination {dest_b}"
+                    f"item {i} destination {dest_a}"
+                    f" is inside item {j} destination {dest_b}"
                 )
             elif dest_b.is_relative_to(dest_a):
                 errors.append(
-                    f"item {j} destination {dest_b} is inside item {i} destination {dest_a}"
+                    f"item {j} destination {dest_b}"
+                    f" is inside item {i} destination {dest_a}"
                 )
 
-    # Check for project-root and .ledger replacement (redundant with per-item check, but belt-and-suspenders)
+    # Check for project-root and .ledger replacement
+    # (redundant with per-item check, but belt-and-suspenders)
     for i, item in enumerate(items):
         resolved = item.destination.resolve()
         if resolved == resolved_root:
@@ -928,6 +922,7 @@ def validate_storage_migration_plan(
         errors=tuple(all_errors),
     )
 
+
 def _hash_tree(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for child in sorted(path.rglob("*")):
@@ -957,8 +952,6 @@ def _copy_tree(source: Path, destination: Path) -> None:
             raise StorageMigrationError(f"migration refuses special file {child}")
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class MigrationItemPaths:
     stage: Path
@@ -983,6 +976,7 @@ def _prepare_item_paths(
     stage = parent / f".{dest_name}.migrating-{suffix}"
     backup = parent / f".{dest_name}.backup-{suffix}"
     return MigrationItemPaths(stage=stage, stage_root=None, backup=backup)
+
 
 def _staging_path(
     source: Path, destination: Path, migration_id: str

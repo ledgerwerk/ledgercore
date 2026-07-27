@@ -1,0 +1,325 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.5.1
+git_base_ref: v0.5.0
+git_base_sha: 47024e7c0d9873e93c28e05ad3538bd292e25efa
+git_head_ref: HEAD
+git_head_sha: 7a06dbc637f34e75e4f113f517b5ed8289e8bfdb
+git_range: 47024e7c0d9873e93c28e05ad3538bd292e25efa..7a06dbc637f34e75e4f113f517b5ed8289e8bfdb
+commit_count: 13
+rows:
+- sha: af5549f68f4d51a4e76899583b5cbd49602eb45a
+  source_ref: git:af5549f68f4d51a4e76899583b5cbd49602eb45a
+  short_sha: af5549f
+  changed_paths:
+  - tests/test_version.py
+  stats:
+    files_changed: 0
+    insertions: 0
+    deletions: 1
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'fix: codecov test'
+- sha: e14897a0558ef8aa7dfef76c4f3760ffc514ed2f
+  source_ref: git:e14897a0558ef8aa7dfef76c4f3760ffc514ed2f
+  short_sha: e14897a
+  changed_paths:
+  - README.md
+  stats:
+    files_changed: 0
+    insertions: 5
+    deletions: 0
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'doc: add badges'
+- sha: 13563936985a0e0d97cfe95b4d74a030750a834a
+  source_ref: git:13563936985a0e0d97cfe95b4d74a030750a834a
+  short_sha: '1356393'
+  changed_paths:
+  - README.md
+  stats:
+    files_changed: 0
+    insertions: 2
+    deletions: 2
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'fix: typo'
+- sha: c45ac34e319756ac4669d4a1d552cd2996573446
+  source_ref: git:c45ac34e319756ac4669d4a1d552cd2996573446
+  short_sha: c45ac34
+  changed_paths:
+  - .archledger/profiles/arc42/sections/content-0004.md
+  - .archledger/profiles/arc42/sections/content-0006.md
+  - .archledger/profiles/arc42/sections/content-0011.md
+  - ARCHITECTURE.md
+  - README.md
+  - docs/api.md
+  - docs/storage.md
+  - ledgercore/cli/__init__.py
+  - ledgercore/cli/deprecation.py
+  - ledgercore/cli/envelope.py
+  - ledgercore/cli/errors.py
+  - ledgercore/cli/inventory.py
+  - ledgercore/cli/migrate.py
+  - ledgercore/cli/model.py
+  - ledgercore/cli/storage.py
+  - ledgercore/migration.py
+  - ledgercore/storage_binding.py
+  - tests/test_migration.py
+  - tests/test_storage_binding.py
+  stats:
+    files_changed: 0
+    insertions: 1392
+    deletions: 113
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'feat: improved migration handling'
+- sha: 1f6f7d7398af838db26aa88a98b85f4373aeb4db
+  source_ref: git:1f6f7d7398af838db26aa88a98b85f4373aeb4db
+  short_sha: 1f6f7d7
+  changed_paths:
+  - ledgercore/cli/migrate.py
+  - tests/test_migration.py
+  stats:
+    files_changed: 0
+    insertions: 74
+    deletions: 1
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'test: reproduce migration journal validation defects'
+- sha: 57d3a002cb0998be74e5255b7b042d0baaad7804
+  source_ref: git:57d3a002cb0998be74e5255b7b042d0baaad7804
+  short_sha: 57d3a00
+  changed_paths:
+  - ledgercore/storage_binding.py
+  - tests/test_storage_binding.py
+  stats:
+    files_changed: 0
+    insertions: 20
+    deletions: 1
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'refactor: share storage binding mapping serialization'
+- sha: 99a269648e926e8dc0dd380fe4659d3ae09cce2f
+  source_ref: git:99a269648e926e8dc0dd380fe4659d3ae09cce2f
+  short_sha: 99a2696
+  changed_paths:
+  - ledgercore/migration.py
+  - tests/test_migration.py
+  stats:
+    files_changed: 0
+    insertions: 185
+    deletions: 144
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'fix: add exact migration journal schema 2'
+- sha: 1c2448a331b293d9d556133a1829a21d467bc917
+  source_ref: git:1c2448a331b293d9d556133a1829a21d467bc917
+  short_sha: 1c2448a
+  changed_paths:
+  - ledgercore/migration.py
+  - tests/test_migration.py
+  stats:
+    files_changed: 0
+    insertions: 48
+    deletions: 2
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'fix: disable destructive migration execution'
+- sha: 9d8945ad3ad44d293958f92acbd26ab73de0c657
+  source_ref: git:9d8945ad3ad44d293958f92acbd26ab73de0c657
+  short_sha: 9d8945a
+  changed_paths:
+  - ledgercore/migration.py
+  - tests/test_migration.py
+  stats:
+    files_changed: 0
+    insertions: 36
+    deletions: 1
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'fix: report migration recovery capability truthfully'
+- sha: f1cd1bc1f46a61c03f942805264eaa952e509cbb
+  source_ref: git:f1cd1bc1f46a61c03f942805264eaa952e509cbb
+  short_sha: f1cd1bc
+  changed_paths:
+  - .archledger/profiles/arc42/sections/content-0004.md
+  - .archledger/profiles/arc42/sections/content-0006.md
+  - .archledger/profiles/arc42/sections/content-0011.md
+  - ARCHITECTURE.md
+  - CHANGELOG.md
+  - README.md
+  - docs/api.md
+  - docs/storage.md
+  - ledgercore/migration.py
+  - tests/test_migration.py
+  stats:
+    files_changed: 0
+    insertions: 95
+    deletions: 52
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'docs: document Ledgercore 0.5.1 migration containment'
+- sha: 355788cc3d50b763e65f8507770bba608eff23d6
+  source_ref: git:355788cc3d50b763e65f8507770bba608eff23d6
+  short_sha: 355788c
+  changed_paths:
+  - .archledger/document-state.json
+  - .archledger/profiles/arc42/sections/content-0011.md
+  - .taskledger.toml
+  - ARCHITECTURE.md
+  - tests/test_config.py
+  - tests/test_migration.py
+  stats:
+    files_changed: 0
+    insertions: 59
+    deletions: 53
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'fix: pytest'
+- sha: 0a0a215190b1fd8663ba7be9fa2964a4c10ebb3c
+  source_ref: git:0a0a215190b1fd8663ba7be9fa2964a4c10ebb3c
+  short_sha: 0a0a215
+  changed_paths:
+  - .gitignore
+  - .ledger/ledger.toml
+  - .ledger/migrations/06019391-2e86-4378-80f6-a80828e0cf12.toml
+  - .ledger/migrations/09770cfd-75e6-4c1a-8bd1-e31d130588f0.toml
+  - .ledger/migrations/1e7791b8-c483-404a-b025-04d3f14c8acd.toml
+  - .ledger/migrations/2c0638fd-95bd-47a1-9639-58f42e61f163.toml
+  - .ledger/migrations/5058aae3-3f08-4be0-a7b0-206cdd9cf204.toml
+  - .ledger/migrations/5ca24971-ea48-4797-94ee-2a1c018e600b.toml
+  - .ledger/migrations/5e879c1d-d3d1-4711-a68f-7f2ff3c50345.toml
+  - .ledger/migrations/61722018-1f38-4f31-85c8-0cae6f5dd105.toml
+  - .ledger/migrations/6553daa5-bea2-44a8-a3f5-059f183ab9b8.toml
+  - .ledger/migrations/69665cbb-b2cc-4c3c-956a-c57847beb2ce.toml
+  - .ledger/migrations/76141404-7c6b-4933-81e3-3f8a8ab837b8.toml
+  - .ledger/migrations/7b347695-efe9-4b94-80d2-7de25a7e0591.toml
+  - .ledger/migrations/8019c2d8-419c-44e1-9853-c77861adba44.toml
+  - .ledger/migrations/8ce9ef20-e23b-4a07-be41-966fd01beffa.toml
+  - .ledger/migrations/9abfa7c5-ef46-4d27-aa9a-431983455aa2.toml
+  - .ledger/migrations/a3632ed2-cf6c-43d7-b983-d52734096591.toml
+  - .ledger/migrations/bac662bc-d6be-4cfb-bdcb-b625a9ce1b51.toml
+  - .ledger/migrations/c11c944a-d67d-45c2-a7fd-0d84d4b41ff4.toml
+  - .ledger/migrations/da8c17ce-3d99-410f-925c-4f604396eb14.toml
+  - .ledger/migrations/ecaaa4a4-8cc6-44b3-a269-03a725b78871.toml
+  - .ledger/releaseledger/.ledger-project.toml
+  - .ledger/releaseledger/.releaseledger-migration.jsonl
+  - .ledger/releaseledger/config.toml
+  - .ledger/releaseledger/config.toml.migrating-d6fa1ca8-47a3-47ff-8acb-070bf5ed6b85
+  - .ledger/releaseledger/data/.ledger-project.toml
+  - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/audit/commit-audit.yaml
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0004.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0005.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0006.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0007.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0008.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0009.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0010.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0011.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0012.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/entries/entry-0013.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/release.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/audit/commit-audit.yaml
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0004.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0005.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0006.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0007.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0008.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0009.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/entries/entry-0010.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.0/release.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/audit/commit-audit.yaml
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/entries/entry-0004.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/entries/entry-0005.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/entries/entry-0006.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.2.1/release.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/entries/entry-0004.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.4.0/release.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.5.0/audit/commit-audit.yaml
+  - .ledger/releaseledger/data/ledgers/main/releases/0.5.0/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.5.0/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.5.0/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.5.0/release.md
+  - .ledger/releaseledger/write.lock
+  - .releaseledger/ledgers/main/indexes/entries.json
+  - .releaseledger/ledgers/main/indexes/releases.json
+  - .taskledger.toml
+  - ledgercore/migration.py
+  - ledgercore/storage_binding.py
+  stats:
+    files_changed: 0
+    insertions: 1961
+    deletions: 716
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'feat: migrate releaseledger'
+- sha: 7a06dbc637f34e75e4f113f517b5ed8289e8bfdb
+  source_ref: git:7a06dbc637f34e75e4f113f517b5ed8289e8bfdb
+  short_sha: 7a06dbc
+  changed_paths:
+  - ledgercore/__init__.py
+  - ledgercore/migration.py
+  - tests/test_migration_fingerprints.py
+  stats:
+    files_changed: 0
+    insertions: 1407
+    deletions: 16
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  evidence_subject: 'feat: imptoved migration'

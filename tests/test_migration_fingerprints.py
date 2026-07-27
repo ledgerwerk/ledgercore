@@ -9,16 +9,8 @@ import pytest
 
 from ledgercore.errors import StorageMigrationError
 from ledgercore.migration import (
-    DestinationPolicy,
-    MigrationItemPaths,
-    StorageDestinationInspection,
-    StorageFingerprint,
-    StorageFingerprintEntry,
     StorageMigrationItem,
-    StorageMigrationItemValidation,
     StorageMigrationPlan,
-    StorageMigrationPlanValidation,
-    _check_path_overlaps,
     _prepare_item_paths,
     fingerprint_storage_directory,
     fingerprint_storage_file,
@@ -27,14 +19,12 @@ from ledgercore.migration import (
 )
 from ledgercore.storage_binding import (
     StorageBinding,
-    storage_bindings_match,
-    write_storage_binding,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _binding(
     project_uuid: str = "test-uuid",
@@ -57,11 +47,15 @@ def _file_binding(
     project_uuid: str = "test-uuid",
     tool: str = "test-tool",
 ) -> StorageBinding:
-    return _binding(project_uuid=project_uuid, tool=tool, mount="config", storage="project")
+    return _binding(
+        project_uuid=project_uuid, tool=tool, mount="config", storage="project"
+    )
 
 
 def _create_tree(root: Path, structure: dict[str, object]) -> None:
-    """Create a directory tree from a nested dict. Files are str (content), dirs are dict."""
+    """Create a directory tree from a nested dict.
+    Files are str (content), dirs are dict.
+    """
     for name, value in structure.items():
         path = root / name
         if isinstance(value, dict):
@@ -77,8 +71,8 @@ def _create_tree(root: Path, structure: dict[str, object]) -> None:
 def _write_marker(directory: Path, binding: StorageBinding) -> None:
     marker = directory / ".ledger-project.toml"
     marker.write_text(
-        f'schema_version = 1\n'
-        f'layout_version = 3\n'
+        f"schema_version = 1\n"
+        f"layout_version = 3\n"
         f'project_uuid = "{binding.project_uuid}"\n'
         f'tool = "{binding.tool}"\n'
         f'mount = "{binding.mount}"\n'
@@ -91,8 +85,8 @@ def _write_marker(directory: Path, binding: StorageBinding) -> None:
 # Directory fingerprint tests
 # ---------------------------------------------------------------------------
 
-class TestDirectoryFingerprint:
 
+class TestDirectoryFingerprint:
     def test_deterministic(self, tmp_path: Path) -> None:
         """Identical trees in different creation orders produce the same digest."""
         tree1 = tmp_path / "tree1"
@@ -192,8 +186,8 @@ class TestDirectoryFingerprint:
 # File fingerprint tests
 # ---------------------------------------------------------------------------
 
-class TestFileFingerprint:
 
+class TestFileFingerprint:
     def test_basic(self, tmp_path: Path) -> None:
         """File fingerprint has correct algorithm, file_count, total_bytes."""
         target = tmp_path / "config.toml"
@@ -239,8 +233,8 @@ class TestFileFingerprint:
 # Destination inspection tests
 # ---------------------------------------------------------------------------
 
-class TestDestinationInspection:
 
+class TestDestinationInspection:
     def test_absent(self, tmp_path: Path) -> None:
         """Missing directory returns 'absent'."""
         result = inspect_storage_migration_destination(
@@ -360,11 +354,13 @@ class TestDestinationInspection:
 # Plan validation tests — destination policy matrix
 # ---------------------------------------------------------------------------
 
+
 def _make_plan(
     items: tuple[StorageMigrationItem, ...],
     project_uuid: str = "test-uuid",
 ) -> StorageMigrationPlan:
-    from ledgercore.manifest import LedgerProjectManifest, LedgerLocalOverrides
+    from ledgercore.manifest import LedgerLocalOverrides
+
     return StorageMigrationPlan(
         migration_id="test-migration-id",
         project_uuid=project_uuid,
@@ -375,7 +371,6 @@ def _make_plan(
 
 
 class TestPlanValidation:
-
     def test_create_only_absent_ok(self, tmp_path: Path) -> None:
         """create-only + absent destination → create action."""
         item = StorageMigrationItem(
@@ -623,8 +618,8 @@ class TestPlanValidation:
 # Path overlap tests
 # ---------------------------------------------------------------------------
 
-class TestPathOverlap:
 
+class TestPathOverlap:
     def test_rejects_overlapping_destinations(self, tmp_path: Path) -> None:
         """One item destination inside another → conflict."""
         dest_a = tmp_path / "data"
@@ -721,8 +716,8 @@ class TestPathOverlap:
 # MigrationItemPaths tests
 # ---------------------------------------------------------------------------
 
-class TestPrepareItemPaths:
 
+class TestPrepareItemPaths:
     def test_deterministic_naming(self, tmp_path: Path) -> None:
         """Stage and backup paths include migration-id and item-index."""
         dest = tmp_path / "data"
@@ -745,8 +740,8 @@ class TestPrepareItemPaths:
 # Existing behavior preservation
 # ---------------------------------------------------------------------------
 
-class TestExistingBehaviorPreserved:
 
+class TestExistingBehaviorPreserved:
     def test_default_policy_is_create_only(self, tmp_path: Path) -> None:
         """StorageMigrationItem defaults to create-only policy."""
         item = StorageMigrationItem(
