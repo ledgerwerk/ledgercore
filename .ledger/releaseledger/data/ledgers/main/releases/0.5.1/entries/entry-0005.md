@@ -12,9 +12,9 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:57d3a002cb0998be74e5255b7b042d0baaad7804
+  - git:57d3a002cb0998be74e5255b7b042d0baaad7804
 paths:
-- ledgercore/migration.py
+  - ledgercore/migration.py
 issues: []
 prs: []
 sources: []

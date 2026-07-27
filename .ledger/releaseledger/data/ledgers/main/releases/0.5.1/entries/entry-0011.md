@@ -12,7 +12,7 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:13563936985a0e0d97cfe95b4d74a030750a834a
+  - git:13563936985a0e0d97cfe95b4d74a030750a834a
 paths: []
 issues: []
 prs: []
