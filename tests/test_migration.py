@@ -373,6 +373,77 @@ def test_invalid_journal_data_rejection(tmp_path: Path) -> None:
         inspect_storage_migration(p)
     assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
 
+
+def _write_schema2_journal(path: Path, *, phase: str = "complete", items: str = "") -> None:
+    path.write_text(
+        "schema_version = 2\n"
+        'migration_id = "test-migration"\n'
+        f'project_uuid = "{UUID}"\n'
+        f'phase = "{phase}"\n'
+        'mode = "copy"\n'
+        'verify = "sha256"\n'
+        'project_root = "/tmp/project"\n'
+        "items_completed = 0\n"
+        "source_removed = false\n"
+        "\n"
+        "[items]\n"
+        f"{items}",
+        encoding="utf-8",
+    )
+
+
+def test_schema2_rejects_unsupported_phase(tmp_path: Path) -> None:
+    journal_path = tmp_path / "unsupported-phase.toml"
+    _write_schema2_journal(journal_path, phase="resuming")
+
+    with pytest.raises(StorageMigrationError) as exc_info:
+        inspect_storage_migration(journal_path)
+
+    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
+
+
+def test_schema2_rejects_non_string_identity_fields(tmp_path: Path) -> None:
+    journal_path = tmp_path / "invalid-identity.toml"
+    journal_path.write_text(
+        "schema_version = 2\n"
+        "migration_id = 42\n"
+        f'project_uuid = "{UUID}"\n'
+        'phase = "complete"\n'
+        'mode = "copy"\n'
+        'verify = "sha256"\n'
+        'project_root = "/tmp/project"\n'
+        "items_completed = 0\n"
+        "source_removed = false\n"
+        "[items]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StorageMigrationError) as exc_info:
+        inspect_storage_migration(journal_path)
+
+    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
+
+
+def test_schema2_rejects_non_numeric_item_key(tmp_path: Path) -> None:
+    journal_path = tmp_path / "invalid-item-key.toml"
+    _write_schema2_journal(
+        journal_path,
+        items='''
+[items.bad]
+component = "mount"
+tool = "taskledger"
+mount = "data"
+source = "/old/data"
+destination = "/new/data"
+strategy = "copy"
+''',
+    )
+
+    with pytest.raises(StorageMigrationError) as exc_info:
+        inspect_storage_migration(journal_path)
+
+    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
+
     # Missing migration_id in schema 2
     p = journal_dir / "no_id.toml"
     p.write_text(
