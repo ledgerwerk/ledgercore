@@ -158,8 +158,6 @@ Local filesystem
 
 The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state and performs no writes during layout discovery or resolution.
 
-
-
 ## Business Context
 
 <!-- archledger: no accepted records for this section yet -->
@@ -235,8 +233,6 @@ ledgercore
 
 Names exported from modules and the curated package `__all__` are intended API. Underscore-prefixed helpers are internal. Front matter compatibility aliases are public legacy surfaces.
 
-
-
 <!-- archledger: no accepted records for this section yet -->
 
 # Runtime View
@@ -295,8 +291,6 @@ The parser tries canonical, legacy underscore, file-safe, and local forms in ord
 
 Valid object rows are retained in order. Invalid JSON and non-object rows become line-numbered issues. File-level read failures raise a store exception.
 
-
-
 <!-- archledger: no accepted records for this section yet -->
 
 # Deployment View
@@ -333,8 +327,6 @@ Project metadata declares Python 3.10 through 3.13. The code is primarily OS-neu
 - Config discovery walks upward; source iteration returns a fully materialized sorted list.
 
 The deployment model fits repository-scale ledgers, not large datasets or high-throughput storage services.
-
-
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -377,8 +369,6 @@ Numbers are positive and normally padded to four digits. Formatting, parsing, an
 ## Evolution and testing
 
 Compatibility uses permissive input and canonical output. Public additions should be exported, documented, typed, and tested. Pytest covers behavior; Ruff and strict mypy cover style and typing.
-
-
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -430,8 +420,6 @@ Decision drivers are source-control friendliness, a small reviewed dependency su
 
 Most functions are pure transformations or accept explicit paths and policies. Time supports injection, filesystem tests use temporary directories, and no global mutable state prevents isolation.
 
-
-
 ## Quality Requirements Overview
 
 <!-- archledger: no accepted records for this section yet -->
@@ -442,23 +430,23 @@ Most functions are pure transformations or accept explicit paths and policies. T
 
 # Risks and Technical Debt
 
-| Risk / debt                                                | Impact                                                                        | Mitigation                                                                            |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| No inter-process lock or transactional ID allocator        | Concurrent scans can choose the same ID                                       | Pair with exclusive create and retry downstream                                       |
-| Filesystem-dependent atomicity/fsync                       | Crash behavior varies on unusual or network filesystems                       | Colocate temp files and test target environments                                      |
-| Symlink changes after path validation                      | Hostile writable trees can defeat confinement                                 | Treat base trees as trusted; consider descriptor-relative APIs for hardened use       |
-| Whole-file processing                                      | Memory and latency scale with size                                            | Restrict use to ledger-scale artifacts                                                |
-| YAML implicit typing                                       | Scalar interpretation can surprise                                            | Safe loading, timestamp-string option, minimal quoting, and downstream schemas        |
-| Error code declarations may drift from docs                | Consumers may see inconsistent codes                                          | Subclass code attributes are covered by tests before promising code stability         |
-| Package facade may drift from module APIs                  | Imports/docs can lag                                                          | Review `__all__`, docs, and tests together                                            |
-| Permissive reference aliases                               | Ambiguity pressure grows with kind formats                                    | Prefer canonical form and apply allowlists                                            |
-| Informal pre-1.0 compatibility                             | Upgrades may break consumers                                                  | Define deprecation/version policy before 1.0                                          |
-| No property-based or fault-injection tests                 | Rare parser and cleanup edges may escape                                      | Add them where risk justifies complexity                                              |
-| Architecture drift is not CI-gated                         | Documentation can become stale                                                | Maintain source refs and run `archledger source changed` in review                    |
-| Direct sibling roots can collide across projects           | One external store may be selected accidentally                               | Require `.ledger-store` and downstream project-binding markers; fail without fallback |
-| External Git is operator-owned                             | Offline computers can diverge or allocate conflicting IDs                     | Pull, commit, push promptly, and resolve integration conflicts downstream             |
-| Incomplete migration recovery requires manual intervention | Ledgercore 0.5.1 can inspect but not automatically resume incomplete journals | Classify honestly as manual intervention; implement full recovery in 0.6.0            |
-| Completed-only migration recovery                    | A completed journal is reportable, but incomplete work may need operator cleanup | Keep source storage, expose persisted facts, and defer cleanup/recovery APIs to 0.6.0 |
+| Risk / debt                                                | Impact                                                                           | Mitigation                                                                            |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| No inter-process lock or transactional ID allocator        | Concurrent scans can choose the same ID                                          | Pair with exclusive create and retry downstream                                       |
+| Filesystem-dependent atomicity/fsync                       | Crash behavior varies on unusual or network filesystems                          | Colocate temp files and test target environments                                      |
+| Symlink changes after path validation                      | Hostile writable trees can defeat confinement                                    | Treat base trees as trusted; consider descriptor-relative APIs for hardened use       |
+| Whole-file processing                                      | Memory and latency scale with size                                               | Restrict use to ledger-scale artifacts                                                |
+| YAML implicit typing                                       | Scalar interpretation can surprise                                               | Safe loading, timestamp-string option, minimal quoting, and downstream schemas        |
+| Error code declarations may drift from docs                | Consumers may see inconsistent codes                                             | Subclass code attributes are covered by tests before promising code stability         |
+| Package facade may drift from module APIs                  | Imports/docs can lag                                                             | Review `__all__`, docs, and tests together                                            |
+| Permissive reference aliases                               | Ambiguity pressure grows with kind formats                                       | Prefer canonical form and apply allowlists                                            |
+| Informal pre-1.0 compatibility                             | Upgrades may break consumers                                                     | Define deprecation/version policy before 1.0                                          |
+| No property-based or fault-injection tests                 | Rare parser and cleanup edges may escape                                         | Add them where risk justifies complexity                                              |
+| Architecture drift is not CI-gated                         | Documentation can become stale                                                   | Maintain source refs and run `archledger source changed` in review                    |
+| Direct sibling roots can collide across projects           | One external store may be selected accidentally                                  | Require `.ledger-store` and downstream project-binding markers; fail without fallback |
+| External Git is operator-owned                             | Offline computers can diverge or allocate conflicting IDs                        | Pull, commit, push promptly, and resolve integration conflicts downstream             |
+| Incomplete migration recovery requires manual intervention | Ledgercore 0.5.1 can inspect but not automatically resume incomplete journals    | Classify honestly as manual intervention; implement full recovery in 0.6.0            |
+| Completed-only migration recovery                          | A completed journal is reportable, but incomplete work may need operator cleanup | Keep source storage, expose persisted facts, and defer cleanup/recovery APIs to 0.6.0 |
 
 Lack of multi-file transactions, indexing, remote access, and domain validation is an intentional boundary, not an incomplete feature list.
 

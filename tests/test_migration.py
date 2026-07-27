@@ -531,7 +531,7 @@ def test_schema2_rejects_non_numeric_item_key(tmp_path: Path) -> None:
     journal_path = tmp_path / "invalid-item-key.toml"
     _write_schema2_journal(
         journal_path,
-        items='''
+        items="""
 [items.bad]
 component = "mount"
 tool = "taskledger"
@@ -539,7 +539,7 @@ mount = "data"
 source = "/old/data"
 destination = "/new/data"
 strategy = "copy"
-''',
+""",
     )
 
     with pytest.raises(StorageMigrationError) as exc_info:

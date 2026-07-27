@@ -21,6 +21,22 @@ from ledgercore.config import (
 )
 
 
+@pytest.fixture()
+def _isolate_path_to_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent locate_ledger_project from finding configs in ancestor dirs."""
+    real_tmp = tmp_path.resolve()
+    _orig_is_file = Path.is_file
+
+    def _scoped_is_file(self: Path) -> bool:
+        try:
+            self.resolve().relative_to(real_tmp)
+        except ValueError:
+            return False
+        return _orig_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _scoped_is_file)
+
+
 def test_default_filenames_prefer_hidden() -> None:
     assert LEDGER_CONFIG_FILENAMES == (".ledger.toml", "ledger.toml")
 
@@ -187,7 +203,7 @@ class TestLocateLedgerProject:
         assert result.project_root == tmp_path.resolve()
 
     def test_treats_missing_start_as_directory_for_default(
-        self, tmp_path: Path
+        self, tmp_path: Path, _isolate_path_to_tmp: None
     ) -> None:
         missing = tmp_path / "missing" / "path.py"
 
@@ -199,7 +215,9 @@ class TestLocateLedgerProject:
         assert result.config_root == (missing / ".ledger").resolve()
         assert result.manifest_path == (missing / LEDGER_PROJECT_MANIFEST).resolve()
 
-    def test_returns_none_without_default(self, tmp_path: Path) -> None:
+    def test_returns_none_without_default(
+        self, tmp_path: Path, _isolate_path_to_tmp: None
+    ) -> None:
         assert locate_ledger_project(tmp_path) is None
 
 
