@@ -36,11 +36,25 @@ MigrationMode = Literal["copy", "move"]
 VerifyMode = Literal["sha256", "size"]
 MigrationRecoveryCapability = Literal["completed-only", "manual-intervention"]
 
+DestinationPolicy = Literal["create-only", "replace-owned", "noop-if-exact"]
+DestinationKind = Literal["directory", "file"]
+ItemActivationState = Literal[
+    "pending",
+    "staged",
+    "stage-verified",
+    "backup-created",
+    "activated",
+    "post-verified",
+    "rolled-back",
+    "complete",
+]
+
 _JOURNAL_PHASES = frozenset(
     {"planned", "copying", "verified", "config-switched", "complete", "failed"}
 )
 _JOURNAL_COMPONENTS = frozenset({"config", "mount"})
 _JOURNAL_STRATEGIES = frozenset({"copy", "rebuild", "noop"})
+_DESTINATION_POLICIES = frozenset({"create-only", "replace-owned", "noop-if-exact"})
 
 
 def _journal_invalid(message: str) -> StorageMigrationError:
@@ -107,6 +121,341 @@ def _journal_item(
     )
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class StorageFingerprint:
+    algorithm: Literal["sha256-tree-v1", "sha256-file-v1"]
+    digest: str
+    file_count: int
+    total_bytes: int
+
+    @property
+    def encoded(self) -> str:
+        """Return a portable encoded representation: 'algorithm:digest'."""
+        return f"{self.algorithm}:{self.digest}"
+
+
+@dataclass(frozen=True, slots=True)
+class StorageFingerprintEntry:
+    relative_path: str
+    kind: Literal["file", "directory"]
+    sha256: str | None
+    size: int | None
+
+
+
+def _inventory_storage_directory(
+    path: Path,
+    *,
+    ignored_relative_paths: frozenset[str] = frozenset({".ledger-project.toml"}),
+) -> tuple[StorageFingerprintEntry, ...]:
+    """Build a diagnostic inventory of a directory tree.
+
+    Returns entries in POSIX-relative lexical order. Rejects symlinks
+    and special files. Ignores the root .ledger-project.toml marker.
+    """
+    if not path.exists():
+        raise StorageMigrationError(
+            f"fingerprint target {path} does not exist"
+        )
+    if path.is_symlink() or not path.is_dir():
+        raise StorageMigrationError(
+            f"fingerprint target {path} is not a regular directory"
+        )
+    entries: list[StorageFingerprintEntry] = []
+    _walk_directory_for_inventory(path, path, entries, ignored_relative_paths)
+    return tuple(entries)
+
+
+def _walk_directory_for_inventory(
+    root: Path,
+    current: Path,
+    entries: list[StorageFingerprintEntry],
+    ignored_relative_paths: frozenset[str],
+) -> None:
+    """Recursively walk and collect directory/file entries."""
+    children: list[Path] = []
+    for child in current.iterdir():
+        children.append(child)
+    # POSIX-relative lexical order (case-sensitive)
+    children.sort(key=lambda p: p.name)
+    for child in children:
+        rel = child.relative_to(root).as_posix()
+        if current == root and child.name in ignored_relative_paths:
+            continue
+        if child.is_symlink():
+            raise StorageMigrationError(
+                f"fingerprint refuses symlink {child}"
+            )
+        if child.is_dir():
+            entries.append(
+                StorageFingerprintEntry(
+                    relative_path=rel,
+                    kind="directory",
+                    sha256=None,
+                    size=None,
+                )
+            )
+            _walk_directory_for_inventory(root, child, entries, ignored_relative_paths)
+        elif child.is_file():
+            raw = child.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            entries.append(
+                StorageFingerprintEntry(
+                    relative_path=rel,
+                    kind="file",
+                    sha256=digest,
+                    size=len(raw),
+                )
+            )
+        else:
+            raise StorageMigrationError(
+                f"fingerprint refuses special file {child}"
+            )
+
+
+def fingerprint_storage_directory(
+    path: Path,
+    *,
+    ignored_relative_paths: frozenset[str] = frozenset({".ledger-project.toml"}),
+) -> StorageFingerprint:
+    """Compute a deterministic sha256-tree-v1 fingerprint of a directory.
+
+    The canonical stream encodes:
+        D\\0<relative_path>\\0 for directories
+        F\\0<relative_path>\\0<size>\\0<sha256>\\0 for files
+
+    Paths are in POSIX relative form. Entries are sorted in POSIX-relative
+    lexical order. Symlinks and special files are rejected.
+    """
+    entries = _inventory_storage_directory(
+        path, ignored_relative_paths=ignored_relative_paths
+    )
+    hasher = hashlib.sha256()
+    file_count = 0
+    total_bytes = 0
+    for entry in entries:
+        if entry.kind == "directory":
+            hasher.update(f"D\0{entry.relative_path}\0".encode("utf-8"))
+        else:
+            assert entry.sha256 is not None
+            assert entry.size is not None
+            hasher.update(
+                f"F\0{entry.relative_path}\0{entry.size}\0{entry.sha256}\0".encode("utf-8")
+            )
+            file_count += 1
+            total_bytes += entry.size
+    return StorageFingerprint(
+        algorithm="sha256-tree-v1",
+        digest=hasher.hexdigest(),
+        file_count=file_count,
+        total_bytes=total_bytes,
+    )
+
+
+def fingerprint_storage_file(path: Path) -> StorageFingerprint:
+    """Compute a deterministic sha256-file-v1 fingerprint of a regular file.
+
+    The canonical representation is:
+        F\\0<filename>\\0<size>\\0<sha256>
+    """
+    if not path.exists():
+        raise StorageMigrationError(
+            f"fingerprint target {path} does not exist"
+        )
+    if path.is_symlink() or not path.is_file():
+        raise StorageMigrationError(
+            f"fingerprint target {path} is not a regular file"
+        )
+    raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    hasher = hashlib.sha256()
+    hasher.update(f"F\0{path.name}\0{len(raw)}\0{digest}".encode("utf-8"))
+    return StorageFingerprint(
+        algorithm="sha256-file-v1",
+        digest=hasher.hexdigest(),
+        file_count=1,
+        total_bytes=len(raw),
+    )
+
+
+
+DestinationState = Literal["absent", "empty-unbound", "owned", "foreign", "invalid"]
+
+
+@dataclass(frozen=True, slots=True)
+class StorageDestinationInspection:
+    state: DestinationState
+    path: Path
+    kind: DestinationKind
+    binding: StorageBinding | None
+    fingerprint: StorageFingerprint | None
+    error: str | None = None
+
+
+def inspect_storage_migration_destination(
+    *,
+    path: Path,
+    kind: DestinationKind,
+    expected_binding: StorageBinding,
+) -> StorageDestinationInspection:
+    """Inspect a migration destination and classify its current state.
+
+    For directories:
+        - missing: absent
+        - symlink or non-directory: invalid
+        - empty and no marker: empty-unbound
+        - nonempty without marker: invalid
+        - marker mismatch: foreign
+        - marker match: owned
+
+    For config files:
+        - inspect the parent directory binding and file type.
+    """
+    if kind == "file":
+        return _inspect_config_destination(path, expected_binding)
+    return _inspect_directory_destination(path, expected_binding)
+
+
+def _inspect_directory_destination(
+    path: Path,
+    expected_binding: StorageBinding,
+) -> StorageDestinationInspection:
+    """Classify a directory destination."""
+    if not path.exists():
+        return StorageDestinationInspection(
+            state="absent",
+            path=path,
+            kind="directory",
+            binding=None,
+            fingerprint=None,
+        )
+    if path.is_symlink() or not path.is_dir():
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="directory",
+            binding=None,
+            fingerprint=None,
+            error=f"{path} is not a regular directory",
+        )
+    marker = path / ".ledger-project.toml"
+    if not any(path.iterdir()):
+        return StorageDestinationInspection(
+            state="empty-unbound",
+            path=path,
+            kind="directory",
+            binding=None,
+            fingerprint=None,
+        )
+    if not marker.is_file() or marker.is_symlink():
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="directory",
+            binding=None,
+            fingerprint=None,
+            error=f"{path} is non-empty and has no valid binding marker",
+        )
+    try:
+        actual = read_storage_binding(marker)
+    except StorageBindingError as exc:
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="directory",
+            binding=None,
+            fingerprint=None,
+            error=str(exc),
+        )
+    if not storage_bindings_match(actual, expected_binding):
+        return StorageDestinationInspection(
+            state="foreign",
+            path=path,
+            kind="directory",
+            binding=actual,
+            fingerprint=None,
+        )
+    # Owned — compute fingerprint of content (excluding marker)
+    try:
+        fp = fingerprint_storage_directory(path)
+    except StorageMigrationError:
+        fp = None
+    return StorageDestinationInspection(
+        state="owned",
+        path=path,
+        kind="directory",
+        binding=actual,
+        fingerprint=fp,
+    )
+
+
+def _inspect_config_destination(
+    path: Path,
+    expected_binding: StorageBinding,
+) -> StorageDestinationInspection:
+    """Classify a config file destination."""
+    if not path.exists():
+        return StorageDestinationInspection(
+            state="absent",
+            path=path,
+            kind="file",
+            binding=None,
+            fingerprint=None,
+        )
+    if path.is_symlink() or not path.is_file():
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="file",
+            binding=None,
+            fingerprint=None,
+            error=f"{path} is not a regular file",
+        )
+    # Validate parent binding
+    parent = path.parent
+    marker = parent / ".ledger-project.toml"
+    if not marker.is_file() or marker.is_symlink():
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="file",
+            binding=None,
+            fingerprint=None,
+            error=f"parent {parent} has no valid binding marker",
+        )
+    try:
+        actual = read_storage_binding(marker)
+    except StorageBindingError as exc:
+        return StorageDestinationInspection(
+            state="invalid",
+            path=path,
+            kind="file",
+            binding=None,
+            fingerprint=None,
+            error=str(exc),
+        )
+    if not storage_bindings_match(actual, expected_binding):
+        return StorageDestinationInspection(
+            state="foreign",
+            path=path,
+            kind="file",
+            binding=actual,
+            fingerprint=None,
+        )
+    try:
+        fp = fingerprint_storage_file(path)
+    except StorageMigrationError:
+        fp = None
+    return StorageDestinationInspection(
+        state="owned",
+        path=path,
+        kind="file",
+        binding=actual,
+        fingerprint=fp,
+    )
+
 @dataclass(frozen=True)
 class StorageMigrationItem:
     component: Literal["config", "mount"]
@@ -117,6 +466,10 @@ class StorageMigrationItem:
     source_binding: StorageBinding
     destination_binding: StorageBinding
     strategy: MigrationStrategy
+    destination_policy: DestinationPolicy = "create-only"
+    expected_destination_fingerprint: str | None = None
+    expected_source_fingerprint: str | None = None
+    destination_kind: DestinationKind | None = None
 
 
 @dataclass(frozen=True)
@@ -139,6 +492,26 @@ class StorageMigrationPlan:
     items: tuple[StorageMigrationItem, ...]
     config_changes: LedgerLocalOverrides | LedgerProjectManifest
     warnings: tuple[str, ...]
+
+
+
+@dataclass(frozen=True, slots=True)
+class StorageMigrationItemValidation:
+    item_index: int
+    component: str
+    mount_name: str
+    policy: DestinationPolicy
+    source_fingerprint: StorageFingerprint | None
+    destination_fingerprint: StorageFingerprint | None
+    action: Literal["noop", "create", "replace", "rebuild", "conflict"]
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class StorageMigrationPlanValidation:
+    valid: bool
+    items: tuple[StorageMigrationItemValidation, ...]
+    errors: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -300,14 +673,14 @@ def plan_storage_migration(
             _validate_destination(destination, destination_binding)
         items.append(
             StorageMigrationItem(
-                "mount",
-                tool_name,
-                mount_name,
-                source,
-                destination,
-                actual,
-                destination_binding,
-                strategy,
+                component="mount",
+                tool_name=tool_name,
+                mount_name=mount_name,
+                source=source,
+                destination=destination,
+                source_binding=actual,
+                destination_binding=destination_binding,
+                strategy=strategy,
             )
         )
     if include_config:
@@ -331,14 +704,14 @@ def plan_storage_migration(
         items.insert(
             0,
             StorageMigrationItem(
-                "config",
-                tool_name,
-                "config",
-                source,
-                destination,
-                source_binding,
-                destination_binding,
-                strategy,
+                component="config",
+                tool_name=tool_name,
+                mount_name="config",
+                source=source,
+                destination=destination,
+                source_binding=source_binding,
+                destination_binding=destination_binding,
+                strategy=strategy,
             ),
         )
     if any(item.strategy == "rebuild" for item in items):
@@ -351,6 +724,209 @@ def plan_storage_migration(
         warnings=tuple(warnings),
     )
 
+
+
+
+def _validate_plan_item(
+    item: StorageMigrationItem,
+    item_index: int,
+    project_root: Path,
+) -> StorageMigrationItemValidation:
+    """Validate a single migration item against its destination policy."""
+    errors: list[str] = []
+    action: Literal["noop", "create", "replace", "rebuild", "conflict"] = "create"
+    dest_fp: StorageFingerprint | None = None
+
+    # Reject project-root and .ledger replacement
+    resolved_dest = item.destination.resolve()
+    resolved_root = project_root.resolve()
+    if resolved_dest == resolved_root:
+        errors.append(
+            f"item {item_index}: destination {item.destination} is the project root"
+        )
+        return StorageMigrationItemValidation(
+            item_index=item_index,
+            component=item.component,
+            mount_name=item.mount_name,
+            policy=item.destination_policy,
+            source_fingerprint=None,
+            destination_fingerprint=None,
+            action="conflict",
+            errors=tuple(errors),
+        )
+    ledger_dir = resolved_root / ".ledger"
+    if resolved_dest == ledger_dir:
+        errors.append(
+            f"item {item_index}: destination {item.destination} is the .ledger directory"
+        )
+        return StorageMigrationItemValidation(
+            item_index=item_index,
+            component=item.component,
+            mount_name=item.mount_name,
+            policy=item.destination_policy,
+            source_fingerprint=None,
+            destination_fingerprint=None,
+            action="conflict",
+            errors=tuple(errors),
+        )
+
+    inspection = inspect_storage_migration_destination(
+        path=item.destination,
+        kind=item.destination_kind or ("file" if item.component == "config" else "directory"),
+        expected_binding=item.destination_binding,
+    )
+    dest_fp = inspection.fingerprint
+
+    policy = item.destination_policy
+
+    if inspection.state == "foreign":
+        errors.append(
+            f"item {item_index}: destination is foreign (bound to different project/tool/mount)"
+        )
+        action = "conflict"
+    elif inspection.state == "invalid":
+        errors.append(
+            f"item {item_index}: destination is invalid: {inspection.error}"
+        )
+        action = "conflict"
+    elif policy == "create-only":
+        if inspection.state in ("owned",):
+            errors.append(
+                f"item {item_index}: create-only policy rejects owned destination"
+            )
+            action = "conflict"
+        elif inspection.state == "empty-unbound":
+            action = "create"
+        elif inspection.state == "absent":
+            action = "create"
+    elif policy == "replace-owned":
+        if item.expected_destination_fingerprint is None:
+            errors.append(
+                f"item {item_index}: replace-owned requires expected_destination_fingerprint"
+            )
+            action = "conflict"
+        elif inspection.state != "owned":
+            errors.append(
+                f"item {item_index}: replace-owned requires owned destination, "
+                f"got {inspection.state}"
+            )
+            action = "conflict"
+        elif dest_fp is not None and dest_fp.encoded != item.expected_destination_fingerprint:
+            errors.append(
+                f"item {item_index}: destination fingerprint changed; "
+                f"expected {item.expected_destination_fingerprint}, "
+                f"actual {dest_fp.encoded}"
+            )
+            action = "conflict"
+        else:
+            action = "replace"
+    elif policy == "noop-if-exact":
+        if item.expected_destination_fingerprint is None:
+            errors.append(
+                f"item {item_index}: noop-if-exact requires expected_destination_fingerprint"
+            )
+            action = "conflict"
+        elif inspection.state == "absent":
+            errors.append(
+                f"item {item_index}: noop-if-exact requires existing destination"
+            )
+            action = "conflict"
+        elif dest_fp is not None and dest_fp.encoded == item.expected_destination_fingerprint:
+            action = "noop"
+        else:
+            errors.append(
+                f"item {item_index}: noop-if-exact destination differs from expected"
+            )
+            action = "conflict"
+
+    # For rebuild strategy, override action
+    if item.strategy == "rebuild" and not errors:
+        action = "rebuild"
+
+    return StorageMigrationItemValidation(
+        item_index=item_index,
+        component=item.component,
+        mount_name=item.mount_name,
+        policy=policy,
+        source_fingerprint=None,
+        destination_fingerprint=dest_fp,
+        action=action,
+        errors=tuple(errors),
+    )
+
+
+def _check_path_overlaps(
+    items: tuple[StorageMigrationItem, ...],
+    project_root: Path,
+    migration_id: str,
+) -> tuple[str, ...]:
+    """Check for path overlaps between items. Returns error messages."""
+    errors: list[str] = []
+    resolved_root = project_root.resolve()
+
+    # Collect all paths
+    destinations: list[tuple[int, Path]] = []
+    for i, item in enumerate(items):
+        destinations.append((i, item.destination.resolve()))
+
+    # Check destination overlaps
+    for i, (_, dest_a) in enumerate(destinations):
+        for j, (_, dest_b) in enumerate(destinations):
+            if i >= j:
+                continue
+            if dest_a == dest_b:
+                errors.append(
+                    f"items {i} and {j} have the same destination {dest_a}"
+                )
+            elif dest_a.is_relative_to(dest_b):
+                errors.append(
+                    f"item {i} destination {dest_a} is inside item {j} destination {dest_b}"
+                )
+            elif dest_b.is_relative_to(dest_a):
+                errors.append(
+                    f"item {j} destination {dest_b} is inside item {i} destination {dest_a}"
+                )
+
+    # Check for project-root and .ledger replacement (redundant with per-item check, but belt-and-suspenders)
+    for i, item in enumerate(items):
+        resolved = item.destination.resolve()
+        if resolved == resolved_root:
+            errors.append(f"item {i}: destination is the project root")
+        if resolved == resolved_root / ".ledger":
+            errors.append(f"item {i}: destination is the .ledger directory")
+
+    return tuple(errors)
+
+
+def validate_storage_migration_plan(
+    plan: StorageMigrationPlan,
+    *,
+    project_root: Path | None = None,
+) -> StorageMigrationPlanValidation:
+    """Perform side-effect-free validation of a migration plan.
+
+    Validates destination policies, fingerprints, bindings, and path overlaps
+    without creating or modifying any filesystem entry.
+    """
+    root = (project_root or Path.cwd()).resolve(strict=False)
+    all_errors: list[str] = []
+    item_validations: list[StorageMigrationItemValidation] = []
+
+    # Validate each item
+    for i, item in enumerate(plan.items):
+        item_val = _validate_plan_item(item, i, root)
+        item_validations.append(item_val)
+        all_errors.extend(item_val.errors)
+
+    # Check path overlaps
+    overlap_errors = _check_path_overlaps(plan.items, root, plan.migration_id)
+    all_errors.extend(overlap_errors)
+
+    return StorageMigrationPlanValidation(
+        valid=len(all_errors) == 0,
+        items=tuple(item_validations),
+        errors=tuple(all_errors),
+    )
 
 def _hash_tree(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
@@ -380,6 +956,33 @@ def _copy_tree(source: Path, destination: Path) -> None:
         else:
             raise StorageMigrationError(f"migration refuses special file {child}")
 
+
+
+
+@dataclass(frozen=True, slots=True)
+class MigrationItemPaths:
+    stage: Path
+    stage_root: Path | None
+    backup: Path
+
+
+def _prepare_item_paths(
+    destination: Path,
+    migration_id: str,
+    item_index: int,
+) -> MigrationItemPaths:
+    """Derive deterministic stage and backup paths for a migration item.
+
+    Naming convention:
+        stage: .<destination-name>.migrating-<migration-id>-<item-index>
+        backup: .<destination-name>.backup-<migration-id>-<item-index>
+    """
+    dest_name = destination.name
+    parent = destination.parent
+    suffix = f"{migration_id}-{item_index}"
+    stage = parent / f".{dest_name}.migrating-{suffix}"
+    backup = parent / f".{dest_name}.backup-{suffix}"
+    return MigrationItemPaths(stage=stage, stage_root=None, backup=backup)
 
 def _staging_path(
     source: Path, destination: Path, migration_id: str
