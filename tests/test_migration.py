@@ -373,6 +373,56 @@ def test_invalid_journal_data_rejection(tmp_path: Path) -> None:
         inspect_storage_migration(p)
     assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
 
+    # Missing migration_id in schema 2
+    p = journal_dir / "no_id.toml"
+    p.write_text(
+        'schema_version = 2\nphase = "complete"\n'
+        'project_uuid = "x"\nmode = "copy"\nverify = "sha256"\n'
+        'project_root = "/tmp"\nitems_completed = 0\n'
+        "source_removed = false\n[items]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(StorageMigrationError) as exc_info:
+        inspect_storage_migration(p)
+    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
+
+    # Non-integer items_completed
+    p = journal_dir / "bad_completed.toml"
+    p.write_text(
+        'schema_version = 2\nmigration_id = "x"\n'
+        'phase = "complete"\nproject_uuid = "x"\n'
+        'mode = "copy"\nverify = "sha256"\n'
+        'project_root = "/tmp"\n'
+        'items_completed = "not-int"\n'
+        "source_removed = false\n[items]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(StorageMigrationError) as exc_info:
+        inspect_storage_migration(p)
+    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
+
+    # Invalid mode
+    p = journal_dir / "bad_mode.toml"
+    p.write_text(
+        'schema_version = 2\nmigration_id = "x"\n'
+        'phase = "complete"\nproject_uuid = "x"\n'
+        'mode = "invalid"\nverify = "sha256"\n'
+        'project_root = "/tmp"\n'
+        "items_completed = 0\n"
+        "source_removed = false\n[items]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(StorageMigrationError) as exc_info:
+        inspect_storage_migration(p)
+    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
+
+    # Symlink journal path
+    symlink = journal_dir / "symlink.toml"
+    symlink.symlink_to(p)
+    with pytest.raises(StorageMigrationError) as exc_info:
+        inspect_storage_migration(symlink)
+    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
+
 
 def _write_schema2_journal(path: Path, *, phase: str = "complete", items: str = "") -> None:
     path.write_text(
@@ -442,56 +492,6 @@ strategy = "copy"
     with pytest.raises(StorageMigrationError) as exc_info:
         inspect_storage_migration(journal_path)
 
-    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
-
-    # Missing migration_id in schema 2
-    p = journal_dir / "no_id.toml"
-    p.write_text(
-        'schema_version = 2\nphase = "complete"\n'
-        'project_uuid = "x"\nmode = "copy"\nverify = "sha256"\n'
-        'project_root = "/tmp"\nitems_completed = 0\n'
-        "source_removed = false\n[items]\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(StorageMigrationError) as exc_info:
-        inspect_storage_migration(p)
-    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
-
-    # Non-integer items_completed
-    p = journal_dir / "bad_completed.toml"
-    p.write_text(
-        'schema_version = 2\nmigration_id = "x"\n'
-        'phase = "complete"\nproject_uuid = "x"\n'
-        'mode = "copy"\nverify = "sha256"\n'
-        'project_root = "/tmp"\n'
-        'items_completed = "not-int"\n'
-        "source_removed = false\n[items]\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(StorageMigrationError) as exc_info:
-        inspect_storage_migration(p)
-    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
-
-    # Invalid mode
-    p = journal_dir / "bad_mode.toml"
-    p.write_text(
-        'schema_version = 2\nmigration_id = "x"\n'
-        'phase = "complete"\nproject_uuid = "x"\n'
-        'mode = "invalid"\nverify = "sha256"\n'
-        'project_root = "/tmp"\n'
-        "items_completed = 0\n"
-        "source_removed = false\n[items]\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(StorageMigrationError) as exc_info:
-        inspect_storage_migration(p)
-    assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
-
-    # Symlink journal path
-    symlink = journal_dir / "symlink.toml"
-    symlink.symlink_to(p)
-    with pytest.raises(StorageMigrationError) as exc_info:
-        inspect_storage_migration(symlink)
     assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
 
 

@@ -34,6 +34,76 @@ MigrationMode = Literal["copy", "move"]
 VerifyMode = Literal["sha256", "size"]
 MigrationRecoveryCapability = Literal["completed-only", "manual-intervention"]
 
+_JOURNAL_PHASES = frozenset(
+    {"planned", "copying", "verified", "config-switched", "complete", "failed"}
+)
+_JOURNAL_COMPONENTS = frozenset({"config", "mount"})
+_JOURNAL_STRATEGIES = frozenset({"copy", "rebuild", "noop"})
+
+
+def _journal_invalid(message: str) -> StorageMigrationError:
+    return StorageMigrationError(message, code="STORAGE_MIGRATION_JOURNAL_INVALID")
+
+
+def _journal_string(
+    document: Mapping[str, object],
+    field: str,
+    *,
+    context: str,
+) -> str:
+    value = document.get(field)
+    if isinstance(value, bool) or not isinstance(value, str) or not value:
+        raise _journal_invalid(f"{context} requires non-empty string {field}")
+    return value
+
+
+def _journal_item(
+    row: Mapping[str, object],
+    *,
+    item_id: str,
+    context: str,
+    require_bindings: bool,
+) -> StorageMigrationJournalItem:
+    component = _journal_string(row, "component", context=context)
+    if component not in _JOURNAL_COMPONENTS:
+        raise _journal_invalid(f"{context} has invalid component {component!r}")
+    tool_name = _journal_string(row, "tool", context=context)
+    mount_name = _journal_string(row, "mount", context=context)
+    source_text = _journal_string(row, "source", context=context)
+    destination_text = _journal_string(row, "destination", context=context)
+    strategy = _journal_string(row, "strategy", context=context)
+    if strategy not in _JOURNAL_STRATEGIES:
+        raise _journal_invalid(f"{context} has invalid strategy {strategy!r}")
+    source_binding: StorageBinding | None = None
+    destination_binding: StorageBinding | None = None
+    if require_bindings:
+        source_raw = row.get("source_binding")
+        destination_raw = row.get("destination_binding")
+        if not isinstance(source_raw, Mapping):
+            raise _journal_invalid(f"{context} is missing source_binding")
+        if not isinstance(destination_raw, Mapping):
+            raise _journal_invalid(f"{context} is missing destination_binding")
+        try:
+            source_binding = storage_binding_from_mapping(
+                source_raw, source=f"{context} source_binding"
+            )
+            destination_binding = storage_binding_from_mapping(
+                destination_raw, source=f"{context} destination_binding"
+            )
+        except StorageBindingError as exc:
+            raise _journal_invalid(f"{context} has invalid binding: {exc}") from exc
+    return StorageMigrationJournalItem(
+        item_id=item_id,
+        component=cast(Literal["config", "mount"], component),
+        tool_name=tool_name,
+        mount_name=mount_name,
+        source=Path(source_text),
+        destination=Path(destination_text),
+        strategy=cast(MigrationStrategy, strategy),
+        source_binding=source_binding,
+        destination_binding=destination_binding,
+    )
+
 
 @dataclass(frozen=True)
 class StorageMigrationItem:
@@ -588,25 +658,29 @@ def _inspect_journal_v1(
     journal_path: Path,
 ) -> StorageMigrationJournal:
     """Inspect a schema-1 journal, preserving only known facts."""
-    migration_id = str(document["migration_id"])
-    phase = str(document["phase"])
-    project_uuid = str(document["project_uuid"])
+    context = f"schema-1 journal {journal_path}"
+    migration_id = _journal_string(document, "migration_id", context=context)
+    phase = _journal_string(document, "phase", context=context)
+    project_uuid = _journal_string(document, "project_uuid", context=context)
     error_raw = document.get("error")
-    error = str(error_raw) if error_raw is not None else None
+    if error_raw is not None and (
+        isinstance(error_raw, bool) or not isinstance(error_raw, str)
+    ):
+        raise _journal_invalid(f"{context} has non-string error")
+    error = error_raw
     items_data = document.get("items", {})
+    if not isinstance(items_data, Mapping):
+        raise _journal_invalid(f"{context} items must be a TOML table")
     journal_items: list[StorageMigrationJournalItem] = []
-    for index, row in enumerate(items_data.values()):  # type: ignore[attr-defined]
+    for index, (item_key, row) in enumerate(items_data.items()):
+        if not isinstance(row, Mapping):
+            raise _journal_invalid(f"{context} item {item_key!r} must be a TOML table")
         journal_items.append(
-            StorageMigrationJournalItem(
-                item_id=str(index),
-                component=row["component"],
-                tool_name=row["tool"],
-                mount_name=row["mount"],
-                source=Path(row["source"]),
-                destination=Path(row["destination"]),
-                strategy=row["strategy"],
-                source_binding=None,
-                destination_binding=None,
+            _journal_item(
+                row,
+                item_id=str(item_key) if item_key is not None else str(index),
+                context=f"{context} item {item_key!r}",
+                require_bindings=False,
             )
         )
     # Schema-1: bindings, mode, verify, project_root are unknown
@@ -640,99 +714,66 @@ def _inspect_journal_v2(
     journal_path: Path,
 ) -> StorageMigrationJournal:
     """Strictly inspect a schema-2 journal."""
-    migration_id_raw = document.get("migration_id")
-    if not migration_id_raw:
-        raise StorageMigrationError(
-            "schema-2 journal missing migration_id",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
-        )
-    migration_id = str(migration_id_raw)
-    phase_raw = document.get("phase")
-    if not phase_raw:
-        raise StorageMigrationError(
-            "schema-2 journal missing phase",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
-        )
-    phase = str(phase_raw)
-    project_uuid_raw = document.get("project_uuid")
-    if not project_uuid_raw:
-        raise StorageMigrationError(
-            "schema-2 journal missing project_uuid",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
-        )
-    project_uuid = str(project_uuid_raw)
+    context = f"schema-2 journal {journal_path}"
+    migration_id = _journal_string(document, "migration_id", context=context)
+    phase = _journal_string(document, "phase", context=context)
+    if phase not in _JOURNAL_PHASES:
+        raise _journal_invalid(f"{context} has invalid phase {phase!r}")
+    project_uuid = _journal_string(document, "project_uuid", context=context)
     error_raw = document.get("error")
-    error = str(error_raw) if error_raw is not None else None
+    if error_raw is not None and (
+        isinstance(error_raw, bool) or not isinstance(error_raw, str)
+    ):
+        raise _journal_invalid(f"{context} has non-string error")
+    error = error_raw
     mode_raw = document.get("mode")
     if mode_raw not in ("copy", "move"):
-        raise StorageMigrationError(
-            f"schema-2 journal has invalid mode {mode_raw!r}",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
-        )
+        raise _journal_invalid(f"{context} has invalid mode {mode_raw!r}")
     mode: MigrationMode = mode_raw
     verify_raw = document.get("verify")
     if verify_raw not in ("sha256", "size"):
-        raise StorageMigrationError(
-            f"schema-2 journal has invalid verify {verify_raw!r}",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
-        )
+        raise _journal_invalid(f"{context} has invalid verify {verify_raw!r}")
     verify: VerifyMode = verify_raw
     project_root_raw = document.get("project_root")
-    if not project_root_raw:
-        raise StorageMigrationError(
-            "schema-2 journal missing project_root",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
-        )
-    project_root = Path(str(project_root_raw))
+    if (
+        isinstance(project_root_raw, bool)
+        or not isinstance(project_root_raw, str)
+        or not project_root_raw
+    ):
+        raise _journal_invalid(f"{context} requires non-empty string project_root")
+    project_root = Path(project_root_raw)
     items_completed_raw = document.get("items_completed")
-    if not isinstance(items_completed_raw, int):
-        raise StorageMigrationError(
-            f"schema-2 journal has non-integer items_completed {items_completed_raw!r}",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+    if isinstance(items_completed_raw, bool) or not isinstance(items_completed_raw, int):
+        raise _journal_invalid(
+            f"{context} has non-integer items_completed {items_completed_raw!r}"
         )
     source_removed_raw = document.get("source_removed")
     if not isinstance(source_removed_raw, bool):
-        raise StorageMigrationError(
-            f"schema-2 journal has non-boolean source_removed {source_removed_raw!r}",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        raise _journal_invalid(
+            f"{context} has non-boolean source_removed {source_removed_raw!r}"
         )
     items_data = document.get("items")
-    if not hasattr(items_data, "values"):
-        raise StorageMigrationError(
-            "schema-2 journal has non-table items",
-            code="STORAGE_MIGRATION_JOURNAL_INVALID",
-        )
+    if not isinstance(items_data, Mapping):
+        raise _journal_invalid(f"{context} has non-table items")
+    numeric_keys: list[tuple[int, str]] = []
+    for key in items_data:
+        if not isinstance(key, str) or not key.isdecimal():
+            raise _journal_invalid(f"{context} has non-numeric item key {key!r}")
+        number = int(key)
+        if any(existing == number for existing, _ in numeric_keys):
+            raise _journal_invalid(f"{context} has duplicate item key {key!r}")
+        numeric_keys.append((number, key))
     journal_items: list[StorageMigrationJournalItem] = []
-    for key, row in items_data.items():  # type: ignore[attr-defined]
-        src_binding_raw = row.get("source_binding")
-        if not hasattr(src_binding_raw, "get"):
-            raise StorageMigrationError(
-                f"schema-2 journal item {key} missing source_binding",
-                code="STORAGE_MIGRATION_JOURNAL_INVALID",
-            )
-        dst_binding_raw = row.get("destination_binding")
-        if not hasattr(dst_binding_raw, "get"):
-            raise StorageMigrationError(
-                f"schema-2 journal item {key} missing destination_binding",
-                code="STORAGE_MIGRATION_JOURNAL_INVALID",
-            )
-        src_binding = storage_binding_from_mapping(
-            src_binding_raw, source=f"journal item {key} source_binding"
-        )
-        dst_binding = storage_binding_from_mapping(
-            dst_binding_raw, source=f"journal item {key} destination_binding"
-        )
+    for _, key in sorted(numeric_keys):
+        row = items_data[key]
+        if not isinstance(row, Mapping):
+            raise _journal_invalid(f"{context} item {key!r} must be a TOML table")
         journal_items.append(
-            StorageMigrationJournalItem(
-                item_id=str(key),
-                component=row["component"],
-                tool_name=row["tool"],
-                mount_name=row["mount"],
-                source=Path(row["source"]),
-                destination=Path(row["destination"]),
-                strategy=row["strategy"],
-                source_binding=src_binding,
-                destination_binding=dst_binding,
+            _journal_item(
+                row,
+                item_id=key,
+                context=f"{context} item {key}",
+                require_bindings=True,
             )
         )
     num_items = len(journal_items)
@@ -778,13 +819,13 @@ def inspect_storage_migration(journal_path: Path) -> StorageMigrationJournal:
             f"unable to read migration journal {journal_path}: {exc}",
             code="STORAGE_MIGRATION_JOURNAL_INVALID",
         ) from exc
-    if not hasattr(document, "get"):
+    if not isinstance(document, Mapping):
         raise StorageMigrationError(
             f"migration journal {journal_path} is not a TOML table",
             code="STORAGE_MIGRATION_JOURNAL_INVALID",
         )
     schema_raw = document.get("schema_version")
-    if not isinstance(schema_raw, int):
+    if isinstance(schema_raw, bool) or not isinstance(schema_raw, int):
         raise StorageMigrationError(
             f"migration journal {journal_path} has non-integer schema_version",
             code="STORAGE_MIGRATION_JOURNAL_INVALID",
