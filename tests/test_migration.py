@@ -317,6 +317,41 @@ def test_completed_recovery_schema1(tmp_path: Path) -> None:
     assert recovered.phase == "complete"
 
 
+def test_schema1_unknown_phase_is_manual_intervention(tmp_path: Path) -> None:
+    journal_dir = tmp_path / "project" / ".ledger" / "migrations"
+    journal_dir.mkdir(parents=True)
+    journal_path = journal_dir / "unknown-phase.toml"
+    journal_path.write_text(
+        "schema_version = 1\n"
+        'migration_id = "old-mig"\n'
+        f'project_uuid = "{UUID}"\n'
+        'phase = "legacy-unknown"\n'
+        "[items]\n",
+        encoding="utf-8",
+    )
+
+    journal = inspect_storage_migration(journal_path)
+    assert journal.recovery_capability == "manual-intervention"
+    with pytest.raises(StorageMigrationError) as exc_info:
+        recover_storage_migration(journal_path)
+    assert exc_info.value.code == "STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED"
+
+
+def test_recovery_does_not_modify_journal(tmp_path: Path) -> None:
+    plan, _, _, _, project = _make_plan_external_to_user_data(tmp_path)
+    result = execute_storage_migration(
+        plan,
+        project_root=project,
+        quiescence_check=lambda: None,
+    )
+    before = result.journal_path.read_bytes()
+
+    recovered = recover_storage_migration(result.journal_path)
+
+    assert recovered.source_removed is False
+    assert result.journal_path.read_bytes() == before
+
+
 def test_incomplete_recovery_raises_manual_intervention(tmp_path: Path) -> None:
     """Incomplete journals raise STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED."""
     journal_dir = tmp_path / "project" / ".ledger" / "migrations"

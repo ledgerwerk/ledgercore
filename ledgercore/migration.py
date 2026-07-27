@@ -884,7 +884,7 @@ def recover_storage_migration(
 ) -> StorageMigrationResult:
     """Return completed journal result or refuse incomplete recovery."""
     journal = inspect_storage_migration(journal_path)
-    if journal.phase == "complete":
+    if journal.recovery_capability == "completed-only":
         return StorageMigrationResult(
             journal.migration_id,
             journal.phase,
