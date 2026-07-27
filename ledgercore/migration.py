@@ -483,9 +483,9 @@ def execute_storage_migration(  # noqa: C901
     project_root: Path | None = None,
 ) -> StorageMigrationResult:
     """Execute a previously validated plan with journaled, verified switching."""
-    if mode not in {"copy", "move"} or verify not in {"sha256", "size"}:
+    if mode not in {"copy", "move"}:
         raise StorageMigrationError(
-            "unsupported migration mode or verification mode",
+            "unsupported migration mode",
             code="STORAGE_MIGRATION_INVALID_ARGUMENT",
         )
     if mode == "move":
@@ -494,12 +494,22 @@ def execute_storage_migration(  # noqa: C901
             "is not safely recoverable; use mode='copy'",
             code="STORAGE_MIGRATION_MOVE_DISABLED",
         )
+    if verify not in {"sha256", "size"}:
+        raise StorageMigrationError(
+            "unsupported verification mode",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+        )
     durable = any(
         item.component == "mount" and item.strategy == "copy" for item in plan.items
     )
     if durable and quiescence_check is None:
         raise StorageMigrationError(
             "durable migration requires a downstream quiescence_check"
+        )
+    if quiescence_check is not None and not callable(quiescence_check):
+        raise StorageMigrationError(
+            "quiescence_check must be callable",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
         )
     root = (project_root or Path.cwd()).resolve(strict=False)
     journal = _journal_path(plan, root)
@@ -528,6 +538,16 @@ def execute_storage_migration(  # noqa: C901
         for item in plan.items:
             if item.strategy == "noop":
                 completed += 1
+                _write_journal(
+                    plan,
+                    journal,
+                    phase="copying",
+                    mode=mode,
+                    verify=verify,
+                    project_root=root,
+                    items_completed=completed,
+                    source_removed=False,
+                )
                 continue
             if quiescence_check is not None:
                 quiescence_check()
@@ -538,6 +558,16 @@ def execute_storage_migration(  # noqa: C901
                     actual = read_storage_binding(destination / ".ledger-project.toml")
                     if actual == item.destination_binding:
                         completed += 1
+                        _write_journal(
+                            plan,
+                            journal,
+                            phase="copying",
+                            mode=mode,
+                            verify=verify,
+                            project_root=root,
+                            items_completed=completed,
+                            source_removed=False,
+                        )
                         continue
                 destination.mkdir(parents=True, exist_ok=True)
                 write_storage_binding(destination, item.destination_binding)

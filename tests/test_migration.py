@@ -263,6 +263,22 @@ def test_explicit_move_is_rejected_safely(tmp_path: Path) -> None:
     assert (source / "testfile.txt").read_text(encoding="utf-8") == "hello world"
 
 
+def test_move_rejection_precedes_verification_validation(tmp_path: Path) -> None:
+    plan, _, _, _, project = _make_plan_external_to_user_data(tmp_path)
+
+    with pytest.raises(StorageMigrationError) as exc_info:
+        execute_storage_migration(
+            plan,
+            mode="move",
+            verify="invalid",  # type: ignore[arg-type]
+            project_root=project,
+            quiescence_check=lambda: None,
+        )
+
+    assert exc_info.value.code == "STORAGE_MIGRATION_MOVE_DISABLED"
+    assert not (project / ".ledger" / "migrations").exists()
+
+
 def test_completed_recovery_schema2_copy(tmp_path: Path) -> None:
     """Completed schema-2 copy journal returns source_removed=False."""
     plan, _, _, _, project = _make_plan_external_to_user_data(tmp_path)
