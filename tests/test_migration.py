@@ -475,7 +475,9 @@ def test_invalid_journal_data_rejection(tmp_path: Path) -> None:
     assert exc_info.value.code == "STORAGE_MIGRATION_JOURNAL_INVALID"
 
 
-def _write_schema2_journal(path: Path, *, phase: str = "complete", items: str = "") -> None:
+def _write_schema2_journal(
+    path: Path, *, phase: str = "complete", items: str = ""
+) -> None:
     path.write_text(
         "schema_version = 2\n"
         'migration_id = "test-migration"\n'

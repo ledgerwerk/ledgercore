@@ -773,7 +773,9 @@ def _inspect_journal_v2(
         raise _journal_invalid(f"{context} requires non-empty string project_root")
     project_root = Path(project_root_raw)
     items_completed_raw = document.get("items_completed")
-    if isinstance(items_completed_raw, bool) or not isinstance(items_completed_raw, int):
+    if isinstance(items_completed_raw, bool) or not isinstance(
+        items_completed_raw, int
+    ):
         raise _journal_invalid(
             f"{context} has non-integer items_completed {items_completed_raw!r}"
         )

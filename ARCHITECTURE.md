@@ -1,7 +1,7 @@
 ---
 title: "Architecture Documentation"
-version: 2
-generator: "archledger 0.3.2.dev1+g505ad5c4c"
+version: 3
+generator: "archledger 0.3.2"
 arc42_template_version: "9.0-EN"
 ---
 
@@ -77,17 +77,16 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 | Typed package (`py.typed`)    | Public behavior must remain statically consumable; strict mypy is the target                             |
 | Local filesystem abstraction  | Atomicity, layout resolution, and durability depend on host filesystem and OS semantics                  |
 | UTF-8 text files              | Text readers and writers explicitly encode/decode UTF-8                                                  |
-| No application framework      | Downstream code owns logging, CLI output, configuration, parsing, migration, and recovery                |
+| No application framework      | Downstream code owns logging, CLI output, domain locks, synchronization, and CLI policy                  |
 | Apache-2.0 distribution       | Source and packages remain compatible with that license                                                  |
 
 ## Product constraints
 
-- The package is pre-1.0 (`0.4.0`); patch releases preserve the current minor API where practical, and minor releases may intentionally evolve public APIs before 1.0 with changelog and migration guidance. The 0.4.0 release adds one fixed built-in direct sibling workspace provider while preserving namespaced root overrides.
-- The top-level package re-exports a curated convenience API, including `__version__`. The curated root layout facade exposes `LedgerProjectLocator`, `ResolvedLedgerLayout`, `locate_ledger_project`, `parse_ledger_project_manifest`, `parse_ledger_local_config`, `resolve_ledger_layout`, and `derive_checkout_id`; detailed layout dataclasses remain under `ledgercore.layout`.
-- The canonical layout surface adds `.ledger/ledger.toml` as the canonical shared project marker while keeping schema-version-1 shared-config discovery as a compatibility path.
-- Existing compatibility aliases and documented legacy reference syntax are retained.
-- Persisted formats must stay inspectable with ordinary text tools.
-- The machine-local provider value `sibling-ledger` is the only direct backend. It resolves project-scoped workspace mounts below `<project-root>/../ledger` and requires `.ledger-store`; arbitrary provider declarations, direct cache or checkout mounts, workspace tool configuration, and fallback are unsupported.
+- The package is pre-1.0 (`0.5.0`); breaking minor evolution is documented with compatibility and migration guidance.
+- The top-level package re-exports project loading, schema-3 TOML, path, binding, and migration APIs while detailed values remain in focused modules.
+- `.ledger/ledger.toml` is the canonical manifest and `.ledger/ledger.local.toml` is an optional strict overlay.
+- Persisted formats remain inspectable ordinary UTF-8 text, with comments preserved when TOML documents are edited.
+- Schema 2 and its provider vocabulary remain readable compatibility input only; schema 3 has four named storage kinds and fixed formulas.
 
 ## Engineering constraints
 
@@ -101,7 +100,7 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 - Atomic replacement requires source and destination on the same filesystem, so temporary files are created in the target directory.
 - `fsync` improves crash durability but cannot guarantee every device or filesystem.
 - Path confinement observes symlink resolution at validation time; downstream code must account for time-of-check/time-of-use races in hostile writable trees.
-- Layout discovery and resolution must not create directories, config files, caches, or markers.
+- Ordinary discovery, parsing, resolution, and validation do not write. Explicit initialization and migration APIs own their writes and recovery journals.
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -122,18 +121,18 @@ ledgercore ----> PyYAML
 Local filesystem
 ```
 
-`ledgercore` is not directly operated by an end user. A downstream application invokes it to validate identifiers and paths, parse or render records, discover canonical Ledger-family project markers, and resolve read-only storage topology. The application supplies domain semantics, loads TOML into mappings, chooses locations, and translates `LedgerCoreError` failures into its own interface.
+`ledgercore` is not directly operated by an end user. A downstream application invokes it to validate identifiers and paths, load schema-3 project TOML, resolve deterministic storage, validate ownership markers, and plan or execute explicit migrations. The application supplies domain semantics and downstream quiescence checks, then translates `LedgerCoreError` failures into its own interface.
 
 ## External interfaces
 
-| Interface            | Contract                                                                                                                                        |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions                                                                 |
-| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, and front-matter documents; `.ledger/` layouts; direct sibling store markers; atomic replacement where requested |
-| PyYAML               | Safe YAML loading and dumping                                                                                                                   |
-| platformdirs         | OS-correct user data and cache roots for the built-in layout providers                                                                          |
-| Environment variable | Optional caller-selected variables can disable fsync or override workspace/cache roots and checkout identity                                    |
-| Clock                | Current time is rendered at second precision with a `Z` suffix                                                                                  |
+| Interface            | Contract                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Python API           | Functions, frozen dataclasses, literal policy arguments, and package exceptions                                          |
+| Local filesystem     | UTF-8 text; JSON, JSONL, YAML, TOML, front-matter documents, `.ledger/` layouts, binding markers, and migration journals |
+| PyYAML               | Safe YAML loading and dumping                                                                                            |
+| platformdirs         | OS-correct Ledgerwerk user-data and cache roots                                                                          |
+| Environment variable | Optional caller-selected variables can disable fsync or override workspace/cache roots and checkout identity             |
+| Clock                | Current time is rendered at second precision with a `Z` suffix                                                           |
 
 ## Inside the boundary
 
@@ -141,8 +140,9 @@ Local filesystem
 - Generic text read/write/merge/hash helpers
 - JSON, JSONL, YAML, and front matter serialization
 - Path normalization, strict path validation, confinement, and config discovery
-- Canonical Ledger-family project discovery and typed layout parsing
-- Read-only repository, workspace, cache, and tool-config path resolution
+- Canonical Ledger-family project discovery, schema parsing, and typed layout resolution
+- Deterministic project, external, user-data, cache, and tool-config paths
+- TOML ownership, binding marker validation, migration planning, execution, and journals
 - Numeric ID and cross-ledger reference parsing/formatting
 - SHA-256 fingerprints and UTC timestamp formatting
 - Package-specific exception taxonomy
@@ -158,6 +158,8 @@ Local filesystem
 
 The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state and performs no writes during layout discovery or resolution.
 
+
+
 ## Business Context
 
 <!-- archledger: no accepted records for this section yet -->
@@ -168,7 +170,7 @@ The downstream application owns all persisted data. `ledgercore` keeps no catalo
 
 # Solution Strategy
 
-The architecture remains a stateless utility library organized by technical concern. The 0.5.1 layout layer standardizes schema-3 storage kinds, owns TOML and binding markers, and provides explicit copy-only migration with exact journal binding identity, truthful recovery reporting, and manual-intervention classification for incomplete migrations, without introducing services, Git synchronization, or process-global state.
+The architecture remains a stateless utility library organized by technical concern. The 0.5.1 layout layer standardizes schema-3 storage kinds, owns TOML and binding markers, and provides explicit copy-only migration with exact journal binding identity, truthful recovery reporting, and manual-intervention classification for incomplete migrations, without introducing services, Git synchronization, or process-global state. Recovery is deliberately completed-only in 0.5.1: incomplete journals are inspected without invented facts but are not automatically resumed.
 
 1. **Filesystem safety by explicit primitives.** Atomic replacement writes a temporary sibling, optionally flushes it, calls `os.replace`, and optionally flushes the parent. Create-only writes use `O_CREAT | O_EXCL`.
 2. **Validation at format boundaries.** JSON/YAML loaders require the expected root shape; front matter requires a mapping; IDs, refs, and paths are parsed before use.
@@ -233,6 +235,8 @@ ledgercore
 
 Names exported from modules and the curated package `__all__` are intended API. Underscore-prefixed helpers are internal. Front matter compatibility aliases are public legacy surfaces.
 
+
+
 <!-- archledger: no accepted records for this section yet -->
 
 # Runtime View
@@ -275,12 +279,13 @@ Before replacement, a failure triggers best-effort cleanup and `AtomicWriteError
 
 ## Project layout resolution
 
-1. Discover `.ledger/ledger.toml` from a starting path while preserving legacy-source signals when needed for migration diagnostics.
-2. Parse the project manifest and optional local config from caller-supplied mappings.
-3. Select workspace and cache family roots from explicit arguments, environment overrides, local config, or built-in `platformdirs` defaults.
-4. Derive a checkout ID only when a ledger needs checkout-scoped data.
-5. Resolve repository mounts beneath `.ledger/` and external mounts beneath fixed `projects/<uuid>/project` or `projects/<uuid>/checkouts/<checkout-id>` roots.
-6. Return immutable layout objects without creating directories, markers, or config files.
+1. Discover `.ledger/ledger.toml` and read schema 2 or schema 3 through Ledgercore TOML I/O.
+2. Parse schema 3 and an optional strict local overlay, then derive effective mount values.
+3. Derive `.ledger/<tool>/config.toml` and fixed project, external, user-data, or checkout-cache paths.
+4. Validate external store and project binding markers without writing.
+5. Plan migrations from independently resolved source and target layouts.
+6. Execute explicit migrations through temporary destinations, verification, quiescence checks, atomic configuration switching, and schema-2 journals that preserve exact binding identity. Execution defaults to copy-only mode; destructive mode is disabled. Source storage is always retained. Completed journals return truthful recovery results; incomplete journals require manual intervention. Recovery itself is read-only and does not copy, delete, switch configuration, or rewrite journals.
+7. Return immutable layout and migration values; ordinary resolution creates no directories, markers, or config files.
 
 ## Reference normalization
 
@@ -289,6 +294,8 @@ The parser tries canonical, legacy underscore, file-safe, and local forms in ord
 ## Recoverable JSONL loading
 
 Valid object rows are retained in order. Invalid JSON and non-object rows become line-numbered issues. File-level read failures raise a store exception.
+
+
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -326,6 +333,8 @@ Project metadata declares Python 3.10 through 3.13. The code is primarily OS-neu
 - Config discovery walks upward; source iteration returns a fully materialized sorted list.
 
 The deployment model fits repository-scale ledgers, not large datasets or high-throughput storage services.
+
+
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -368,6 +377,8 @@ Numbers are positive and normally padded to four digits. Formatting, parsing, an
 ## Evolution and testing
 
 Compatibility uses permissive input and canonical output. Public additions should be exported, documented, typed, and tested. Pytest covers behavior; Ruff and strict mypy cover style and typing.
+
+
 
 <!-- archledger: no accepted records for this section yet -->
 
@@ -419,6 +430,8 @@ Decision drivers are source-control friendliness, a small reviewed dependency su
 
 Most functions are pure transformations or accept explicit paths and policies. Time supports injection, filesystem tests use temporary directories, and no global mutable state prevents isolation.
 
+
+
 ## Quality Requirements Overview
 
 <!-- archledger: no accepted records for this section yet -->
@@ -429,21 +442,23 @@ Most functions are pure transformations or accept explicit paths and policies. T
 
 # Risks and Technical Debt
 
-| Risk / debt                                         | Impact                                                    | Mitigation                                                                            |
-| --------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| No inter-process lock or transactional ID allocator | Concurrent scans can choose the same ID                   | Pair with exclusive create and retry downstream                                       |
-| Filesystem-dependent atomicity/fsync                | Crash behavior varies on unusual or network filesystems   | Colocate temp files and test target environments                                      |
-| Symlink changes after path validation               | Hostile writable trees can defeat confinement             | Treat base trees as trusted; consider descriptor-relative APIs for hardened use       |
-| Whole-file processing                               | Memory and latency scale with size                        | Restrict use to ledger-scale artifacts                                                |
-| YAML implicit typing                                | Scalar interpretation can surprise                        | Safe loading, timestamp-string option, minimal quoting, and downstream schemas        |
-| Error code declarations may drift from docs         | Consumers may see inconsistent codes                      | Subclass code attributes are covered by tests before promising code stability         |
-| Package facade may drift from module APIs           | Imports/docs can lag                                      | Review `__all__`, docs, and tests together                                            |
-| Permissive reference aliases                        | Ambiguity pressure grows with kind formats                | Prefer canonical form and apply allowlists                                            |
-| Informal pre-1.0 compatibility                      | Upgrades may break consumers                              | Define deprecation/version policy before 1.0                                          |
-| No property-based or fault-injection tests          | Rare parser and cleanup edges may escape                  | Add them where risk justifies complexity                                              |
-| Architecture drift is not CI-gated                  | Documentation can become stale                            | Maintain source refs and run `archledger source changed` in review                    |
-| Direct sibling roots can collide across projects    | One external store may be selected accidentally           | Require `.ledger-store` and downstream project-binding markers; fail without fallback |
-| External Git is operator-owned                      | Offline computers can diverge or allocate conflicting IDs | Pull, commit, push promptly, and resolve integration conflicts downstream             |
+| Risk / debt                                                | Impact                                                                        | Mitigation                                                                            |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| No inter-process lock or transactional ID allocator        | Concurrent scans can choose the same ID                                       | Pair with exclusive create and retry downstream                                       |
+| Filesystem-dependent atomicity/fsync                       | Crash behavior varies on unusual or network filesystems                       | Colocate temp files and test target environments                                      |
+| Symlink changes after path validation                      | Hostile writable trees can defeat confinement                                 | Treat base trees as trusted; consider descriptor-relative APIs for hardened use       |
+| Whole-file processing                                      | Memory and latency scale with size                                            | Restrict use to ledger-scale artifacts                                                |
+| YAML implicit typing                                       | Scalar interpretation can surprise                                            | Safe loading, timestamp-string option, minimal quoting, and downstream schemas        |
+| Error code declarations may drift from docs                | Consumers may see inconsistent codes                                          | Subclass code attributes are covered by tests before promising code stability         |
+| Package facade may drift from module APIs                  | Imports/docs can lag                                                          | Review `__all__`, docs, and tests together                                            |
+| Permissive reference aliases                               | Ambiguity pressure grows with kind formats                                    | Prefer canonical form and apply allowlists                                            |
+| Informal pre-1.0 compatibility                             | Upgrades may break consumers                                                  | Define deprecation/version policy before 1.0                                          |
+| No property-based or fault-injection tests                 | Rare parser and cleanup edges may escape                                      | Add them where risk justifies complexity                                              |
+| Architecture drift is not CI-gated                         | Documentation can become stale                                                | Maintain source refs and run `archledger source changed` in review                    |
+| Direct sibling roots can collide across projects           | One external store may be selected accidentally                               | Require `.ledger-store` and downstream project-binding markers; fail without fallback |
+| External Git is operator-owned                             | Offline computers can diverge or allocate conflicting IDs                     | Pull, commit, push promptly, and resolve integration conflicts downstream             |
+| Incomplete migration recovery requires manual intervention | Ledgercore 0.5.1 can inspect but not automatically resume incomplete journals | Classify honestly as manual intervention; implement full recovery in 0.6.0            |
+| Completed-only migration recovery                    | A completed journal is reportable, but incomplete work may need operator cleanup | Keep source storage, expose persisted facts, and defer cleanup/recovery APIs to 0.6.0 |
 
 Lack of multi-file transactions, indexing, remote access, and domain validation is an intentional boundary, not an incomplete feature list.
 

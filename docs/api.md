@@ -217,7 +217,7 @@ Pure path helpers derive `.ledger/<tool>/config.toml`, project mounts, external 
 
 ## `ledgercore.migration`
 
-`plan_storage_migration` resolves source and target layouts without writes. `execute_storage_migration` performs verified copy-only activation with temporary destinations, a downstream quiescence callback, atomic configuration switching, and a schema-2 journal. Destructive `mode="move"` is disabled in 0.5.1. `inspect_storage_migration` reads schema-1 and schema-2 journals; schema-1 journals have bindings set to `None`. `recover_storage_migration` returns completed journal results (`source_removed=False` for schema-2 copy, `source_removed=None` for schema-1) and raises `STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED` for incomplete journals. `plan_schema_v2_to_v3` provides conservative schema conversion.
+`plan_storage_migration` resolves source and target layouts without writes. `execute_storage_migration` performs verified copy-only activation with temporary destinations, a downstream quiescence callback, atomic configuration switching, and a schema-2 journal. Destructive `mode="move"` is disabled in 0.5.1. `inspect_storage_migration` reads schema-1 and schema-2 journals; schema-1 journals have bindings, mode, verification, project root, and cleanup outcome set to `None`. `recover_storage_migration` is read-only and returns completed journal results only (`source_removed=False` for schema-2 copy, `source_removed=None` for schema-1); incomplete journals require manual intervention and raise `STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED`. Invalid journals raise `STORAGE_MIGRATION_JOURNAL_INVALID`. `plan_schema_v2_to_v3` provides conservative schema conversion.
 
 ## `ledgercore.layout` compatibility facade
 

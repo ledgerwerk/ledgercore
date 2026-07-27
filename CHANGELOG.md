@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.1] - Unreleased
+
+### Fixed
+
+- Fixed exact migration journal binding identity round-trip (source and destination bindings persisted in schema-2 journals)
+- Fixed schema-1 journal inspection to use `None` for unknown bindings instead of fabricating `storage="project"`
+- Fixed completed recovery to return truthful `source_removed` (`False` for schema-2 copy, `None` for schema-1)
+- Fixed migration progress metadata in schema-2 journals (`items_completed`, `mode`, `verify`, `project_root`)
+
+### Changed
+
+- Changed default migration mode from `move` to `copy`
+- Disabled explicit `mode="move"` execution (raises `STORAGE_MIGRATION_MOVE_DISABLED`)
+- Changed `StorageMigrationResult.source_removed` type from `bool` to `bool | None`
+- Classified incomplete migration recovery as manual intervention (`STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED`)
+
+### Security/data-safety note
+
+Disabling `mode="move"` prevents automatic source deletion while durable cleanup recovery is unavailable. Source storage is always retained after migration in 0.5.1.
+
 ## [0.5.0] - 2026-07-17
 
 ### Added

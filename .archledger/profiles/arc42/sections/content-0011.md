@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0011
-version: 2
+version: 3
 kind: content
 type: section
 section: risks_and_technical_debt
@@ -30,5 +30,6 @@ source_refs:
 | Direct sibling roots can collide across projects           | One external store may be selected accidentally                               | Require `.ledger-store` and downstream project-binding markers; fail without fallback |
 | External Git is operator-owned                             | Offline computers can diverge or allocate conflicting IDs                     | Pull, commit, push promptly, and resolve integration conflicts downstream             |
 | Incomplete migration recovery requires manual intervention | Ledgercore 0.5.1 can inspect but not automatically resume incomplete journals | Classify honestly as manual intervention; implement full recovery in 0.6.0            |
+| Completed-only migration recovery                    | A completed journal is reportable, but incomplete work may need operator cleanup | Keep source storage, expose persisted facts, and defer cleanup/recovery APIs to 0.6.0 |
 
 Lack of multi-file transactions, indexing, remote access, and domain validation is an intentional boundary, not an incomplete feature list.

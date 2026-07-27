@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0006
-version: 1
+version: 2
 kind: content
 type: section
 section: runtime_view
@@ -57,7 +57,7 @@ Before replacement, a failure triggers best-effort cleanup and `AtomicWriteError
 3. Derive `.ledger/<tool>/config.toml` and fixed project, external, user-data, or checkout-cache paths.
 4. Validate external store and project binding markers without writing.
 5. Plan migrations from independently resolved source and target layouts.
-6. Execute explicit migrations through temporary destinations, verification, quiescence checks, atomic configuration switching, and schema-2 journals that preserve exact binding identity. Execution defaults to copy-only mode; destructive mode is disabled. Source storage is always retained. Completed journals return truthful recovery results; incomplete journals require manual intervention.
+6. Execute explicit migrations through temporary destinations, verification, quiescence checks, atomic configuration switching, and schema-2 journals that preserve exact binding identity. Execution defaults to copy-only mode; destructive mode is disabled. Source storage is always retained. Completed journals return truthful recovery results; incomplete journals require manual intervention. Recovery itself is read-only and does not copy, delete, switch configuration, or rewrite journals.
 7. Return immutable layout and migration values; ordinary resolution creates no directories, markers, or config files.
 
 ## Reference normalization

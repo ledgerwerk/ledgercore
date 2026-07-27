@@ -161,6 +161,9 @@ copy journals and `source_removed=None` for schema-1 completed journals.
 Incomplete journals in any phase (`planned`, `copying`, `verified`,
 `config-switched`, or `failed`) require manual intervention; Ledgercore 0.5.1
 can inspect them but cannot safely resume or complete them automatically.
+Recovery is read-only: it never copies data, deletes sources, switches
+configuration, or rewrites a journal. Malformed or unsupported journal data is
+rejected with `STORAGE_MIGRATION_JOURNAL_INVALID`.
 
 Schema 2 can be read for migration. `plan_schema_v2_to_v3` provides conservative
 conversion for simple layouts. Schema-2 provider, namespace, custom path, and

@@ -311,7 +311,7 @@ The four storage kinds are `project`, `external`, `user-data`, and `cache`. Sche
 
 Every config directory and mount can be explicitly initialized with a `.ledger-project.toml` marker. External roots use `.ledger-store.toml`; legacy `.ledger-store` is accepted only for compatibility. Mismatched markers and unbound non-empty directories are rejected.
 
-Storage changes use `plan_storage_migration` and `execute_storage_migration`. Planning is side-effect free. Execution defaults to copy-only mode, validates bindings, uses temporary destinations and SHA-256 verification, requires a downstream quiescence callback for durable mounts, switches configuration atomically, and journals progress with schema-2 journals that preserve exact binding identity. Destructive `mode="move"` is disabled in 0.5.1; source storage is always retained. Completed journals can be recovered; incomplete journals require manual intervention.
+Storage changes use `plan_storage_migration` and `execute_storage_migration`. Planning is side-effect free. Execution defaults to copy-only mode, validates bindings, uses temporary destinations and SHA-256 verification, requires a downstream quiescence callback for durable mounts, switches configuration atomically, and journals progress with schema-2 journals that preserve exact binding identity. Destructive `mode="move"` is disabled in 0.5.1; source storage is always retained. `recover_storage_migration` returns results only for completed journals; incomplete journals are inspectable but require manual intervention and are not automatically recoverable.
 
 Schema 2 remains readable for explicit migration and emits a deprecation warning. The old provider and `sibling-ledger` vocabulary is compatibility input only.
 
