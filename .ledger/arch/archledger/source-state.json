@@ -1,0 +1,46 @@
+{
+  "directories": {
+    ".": {
+      "file_count": 1,
+      "sha256": "fe7ee184283253376598ee417c55e5463b96d2695f57a66c25c0cfebbae48fd0"
+    }
+  },
+  "files": {
+    "archledger.toml": {
+      "sha256": "e400c14aebb7f911ddbce66b1f990ce3523b3ad95f968994e89c0ee5bd88a9e0"
+    }
+  },
+  "project_name": "ledgercore",
+  "project_uuid": "565c0312-b531-4d07-aa1f-32c796f58dae",
+  "reason": "after-migration-to-ledger",
+  "scanner": {
+    "exclude": [
+      ".git/**",
+      ".venv/**",
+      "**/__pycache__/**",
+      ".mypy_cache/**",
+      ".pytest_cache/**",
+      ".ruff_cache/**",
+      "dist/**",
+      "build/**"
+    ],
+    "hash_algorithm": "sha256",
+    "hash_content": "utf8-surrogateescape-lf-normalized",
+    "include": [
+      "**/*.py",
+      "**/*.toml",
+      "**/*.md",
+      "**/*.adoc",
+      "**/*.rst",
+      "**/*.j2",
+      "**/*.yaml",
+      "**/*.yml",
+      "**/*.json"
+    ],
+    "max_file_bytes": 1000000,
+    "mode": "auto",
+    "used": "git"
+  },
+  "schema": "archledger.source-state.v3",
+  "version": 2
+}

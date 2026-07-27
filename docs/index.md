@@ -30,4 +30,5 @@ api
 references
 storage
 release
+changelog
 ```

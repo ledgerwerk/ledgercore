@@ -1,7 +1,7 @@
 # Project-local archledger configuration.
-# This file lives in the source project root.
+# This file lives in .ledger/arch/config.toml
 config_version = 10
-archledger_dir = ".archledger"
+archledger_dir = "archledger"
 
 # Stable project identity. Commit this with your source tree.
 project_uuid = "565c0312-b531-4d07-aa1f-32c796f58dae"
@@ -86,7 +86,7 @@ title = "Architecture Documentation"
 include_help = false
 
 [skill]
-installed = false
+installed = true
 path = "skills/archledger/SKILL.md"
 
 [tracking]
