@@ -134,8 +134,11 @@ class TestDirectoryFingerprint:
         tree = tmp_path / "tree"
         tree.mkdir()
         fifo = tree / "special"
+        mkfifo = getattr(os, "mkfifo", None)
+        if mkfifo is None:
+            pytest.skip("mkfifo not supported")
         try:
-            os.mkfifo(str(fifo))
+            mkfifo(str(fifo))
         except OSError:
             pytest.skip("mkfifo not supported")
         with pytest.raises(StorageMigrationError, match="special file"):
