@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0010
 release_version: 0.6.0
 kind: added
-summary: Added strict plan-structure validation (_validate_plan_structure) for migration_id,
+summary:
+  Added strict plan-structure validation (_validate_plan_structure) for migration_id,
   policies, strategies, kinds
 status: accepted
 audience: null

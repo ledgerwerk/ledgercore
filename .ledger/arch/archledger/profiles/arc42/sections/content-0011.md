@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0011
-version: 3
+version: 6
 kind: content
 type: section
 section: risks_and_technical_debt
@@ -9,9 +9,7 @@ title: Risks and Technical Debt
 order: 110
 status: accepted
 body_format: markdown
-source_refs:
-  - path: ledgercore/time.py
-    reason: Known timestamp semantic limitation
+source_refs: []
 ---
 
 | Risk / debt                                                | Impact                                                                           | Mitigation                                                                            |

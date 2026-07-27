@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0009
 release_version: 0.6.0
 kind: added
-summary: Added render_ledger_manifest and render_ledger_local_config for pure TOML
+summary:
+  Added render_ledger_manifest and render_ledger_local_config for pure TOML
   rendering
 status: accepted
 audience: null

@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0008
-version: 1
+version: 4
 kind: content
 type: section
 section: cross_cutting_concepts
@@ -9,9 +9,7 @@ title: Cross-cutting Concepts
 order: 80
 status: accepted
 body_format: markdown
-source_refs:
-  - path: ledgercore/paths.py
-    reason: Cross-cutting path validation and confinement
+source_refs: []
 ---
 
 ## Errors

@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0013
 release_version: 0.6.0
 kind: changed
-summary: Changed file fingerprints (sha256-file-v1) to be path-independent (content
+summary:
+  Changed file fingerprints (sha256-file-v1) to be path-independent (content
   hash only, no filename)
 status: accepted
 audience: null

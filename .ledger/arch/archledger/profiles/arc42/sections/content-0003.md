@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0003
-version: 2
+version: 5
 kind: content
 type: section
 section: context_and_scope
@@ -9,9 +9,7 @@ title: Context and Scope
 order: 30
 status: accepted
 body_format: markdown
-source_refs:
-  - path: ledgercore/__init__.py
-    reason: Public integration boundary
+source_refs: []
 ---
 
 ```text

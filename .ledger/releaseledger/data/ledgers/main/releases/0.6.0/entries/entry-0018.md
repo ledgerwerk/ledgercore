@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0018
 release_version: 0.6.0
 kind: changed
-summary: Changed executor to call validate_storage_migration_plan before first journal
+summary:
+  Changed executor to call validate_storage_migration_plan before first journal
   write
 status: accepted
 audience: null

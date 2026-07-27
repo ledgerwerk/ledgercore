@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0001
-version: 2
+version: 5
 kind: content
 type: section
 section: introduction_and_goals
@@ -9,9 +9,7 @@ title: Introduction and Goals
 order: 10
 status: accepted
 body_format: markdown
-source_refs:
-  - path: README.md
-    reason: Purpose, goals, public scope, and non-goals
+source_refs: []
 ---
 
 ## Purpose

@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0003
 release_version: 0.6.0
 kind: added
-summary: Added Schema3MigrationJournal, Schema3ItemJournalState, Schema3ConfigSwitchState
+summary:
+  Added Schema3MigrationJournal, Schema3ItemJournalState, Schema3ConfigSwitchState
   dataclasses
 status: accepted
 audience: null

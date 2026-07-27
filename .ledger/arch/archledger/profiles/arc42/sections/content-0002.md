@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0002
-version: 2
+version: 5
 kind: content
 type: section
 section: architecture_constraints
@@ -9,9 +9,7 @@ title: Architecture Constraints
 order: 20
 status: accepted
 body_format: markdown
-source_refs:
-  - path: pyproject.toml
-    reason: Runtime, packaging, typing, and toolchain constraints
+source_refs: []
 ---
 
 | Constraint                    | Architectural consequence                                                                                |

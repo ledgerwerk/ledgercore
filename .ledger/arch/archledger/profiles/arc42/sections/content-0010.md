@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0010
-version: 1
+version: 4
 kind: content
 type: section
 section: quality_requirements
@@ -9,9 +9,7 @@ title: Quality Requirements
 order: 100
 status: accepted
 body_format: markdown
-source_refs:
-  - path: tests
-    reason: Behavioral quality scenarios and regression coverage
+source_refs: []
 ---
 
 ## Quality tree

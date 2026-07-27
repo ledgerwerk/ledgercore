@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0004
 release_version: 0.6.0
 kind: added
-summary: Added write_schema3_journal and _parse_schema3_journal for schema-3 TOML
+summary:
+  Added write_schema3_journal and _parse_schema3_journal for schema-3 TOML
   persistence
 status: accepted
 audience: null

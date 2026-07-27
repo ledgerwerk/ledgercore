@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0006
-version: 2
+version: 5
 kind: content
 type: section
 section: runtime_view
@@ -9,9 +9,7 @@ title: Runtime View
 order: 60
 status: accepted
 body_format: markdown
-source_refs:
-  - path: ledgercore/frontmatter.py
-    reason: Representative parsing and writing runtime flow
+source_refs: []
 ---
 
 ## Atomic replacement

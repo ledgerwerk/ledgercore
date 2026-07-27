@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0012
-version: 1
+version: 4
 kind: content
 type: section
 section: glossary
@@ -9,9 +9,7 @@ title: Glossary
 order: 120
 status: accepted
 body_format: markdown
-source_refs:
-  - path: docs/index.md
-    reason: Project terminology and documentation map
+source_refs: []
 ---
 
 | Term                       | Meaning                                                                  |

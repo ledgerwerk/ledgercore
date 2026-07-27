@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0019
 release_version: 0.6.0
 kind: fixed
-summary: Fixed fail-open validation where fingerprint errors allowed owned+replaceable
+summary:
+  Fixed fail-open validation where fingerprint errors allowed owned+replaceable
   state
 status: accepted
 audience: null

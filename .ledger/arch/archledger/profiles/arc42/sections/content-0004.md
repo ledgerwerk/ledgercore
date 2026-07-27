@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0004
-version: 3
+version: 6
 kind: content
 type: section
 section: solution_strategy
@@ -9,9 +9,7 @@ title: Solution Strategy
 order: 40
 status: accepted
 body_format: markdown
-source_refs:
-  - path: ledgercore/atomic.py
-    reason: Core safety and composition strategy
+source_refs: []
 ---
 
 The architecture remains a stateless utility library organized by technical concern. The 0.5.1 layout layer standardizes schema-3 storage kinds, owns TOML and binding markers, and provides explicit copy-only migration with exact journal binding identity, truthful recovery reporting, and manual-intervention classification for incomplete migrations, without introducing services, Git synchronization, or process-global state. Recovery is deliberately completed-only in 0.5.1: incomplete journals are inspected without invented facts but are not automatically resumed.

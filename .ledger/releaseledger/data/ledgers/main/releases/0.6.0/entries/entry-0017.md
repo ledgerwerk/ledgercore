@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0017
 release_version: 0.6.0
 kind: changed
-summary: Changed replace-owned to use expected_before.fingerprint for before-state
+summary:
+  Changed replace-owned to use expected_before.fingerprint for before-state
   validation
 status: accepted
 audience: null

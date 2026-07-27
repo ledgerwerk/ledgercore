@@ -7,8 +7,9 @@ versioning:
 entry_id: entry-0014
 release_version: 0.6.0
 kind: changed
-summary: 'Changed fingerprint failures to fail closed: state=''invalid'' instead of
-  ''owned'' with missing fingerprint'
+summary:
+  "Changed fingerprint failures to fail closed: state='invalid' instead of
+  'owned' with missing fingerprint"
 status: accepted
 audience: null
 scopes: []

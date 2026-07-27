@@ -2,17 +2,17 @@
   "directories": {
     ".": {
       "file_count": 1,
-      "sha256": "fe7ee184283253376598ee417c55e5463b96d2695f57a66c25c0cfebbae48fd0"
+      "sha256": "e321d56aa0ffc467eb7e2f56ae1235ddf3a7d91e595824c7b177cc50e392cb7a"
     }
   },
   "files": {
     "archledger.toml": {
-      "sha256": "e400c14aebb7f911ddbce66b1f990ce3523b3ad95f968994e89c0ee5bd88a9e0"
+      "sha256": "1f9aa6131dd7b3980b96f5fd2869d4efa7bd15daa1b4ed717fde00f133a52931"
     }
   },
   "project_name": "ledgercore",
   "project_uuid": "565c0312-b531-4d07-aa1f-32c796f58dae",
-  "reason": "after-migration-to-ledger",
+  "reason": "after-fixing-source-refs",
   "scanner": {
     "exclude": [
       ".git/**",
@@ -30,9 +30,6 @@
       "**/*.py",
       "**/*.toml",
       "**/*.md",
-      "**/*.adoc",
-      "**/*.rst",
-      "**/*.j2",
       "**/*.yaml",
       "**/*.yml",
       "**/*.json"
@@ -42,5 +39,5 @@
     "used": "git"
   },
   "schema": "archledger.source-state.v3",
-  "version": 2
+  "version": 4
 }

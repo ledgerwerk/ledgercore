@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0009
-version: 1
+version: 4
 kind: content
 type: section
 section: architecture_decisions
@@ -9,9 +9,7 @@ title: Architecture Decisions
 order: 90
 status: accepted
 body_format: markdown
-source_refs:
-  - path: README.md
-    reason: Documented design boundaries and API intent
+source_refs: []
 ---
 
 | Decision                                     | Status   | Consequence                                                                             |

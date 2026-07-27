@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0005
 release_version: 0.6.0
 kind: added
-summary: Added StorageMigrationHooks for lifecycle callbacks (quiescence, staged/activated
+summary:
+  Added StorageMigrationHooks for lifecycle callbacks (quiescence, staged/activated
   validation, finalize)
 status: accepted
 audience: null

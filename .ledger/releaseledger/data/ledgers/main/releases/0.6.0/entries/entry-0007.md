@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0007
 release_version: 0.6.0
 kind: added
-summary: Added _check_same_filesystem and _validate_same_filesystem for cross-filesystem
+summary:
+  Added _check_same_filesystem and _validate_same_filesystem for cross-filesystem
   detection
 status: accepted
 audience: null

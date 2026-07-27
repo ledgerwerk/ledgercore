@@ -1,7 +1,7 @@
 ---
 schema_version: 4
 id: content-0007
-version: 1
+version: 4
 kind: content
 type: section
 section: deployment_view
@@ -9,9 +9,7 @@ title: Deployment View
 order: 70
 status: accepted
 body_format: markdown
-source_refs:
-  - path: pyproject.toml
-    reason: Distribution and runtime deployment metadata
+source_refs: []
 ---
 
 ```text
