@@ -199,9 +199,11 @@ def initialize_storage_binding(
     marker = path / ".ledger-project.toml"
     if marker.exists():
         existing = read_storage_binding(marker)
-        if existing != binding:
+        if not storage_bindings_match(existing, binding):
+            diff = storage_binding_diff(existing, binding)
             raise StorageBindingError(
-                f"storage binding marker {marker} belongs to another location"
+                f"storage binding marker {marker} belongs to another location; "
+                f"differences: {diff['differences']}"
             )
         return existing
     write_storage_binding(marker, binding)
@@ -256,18 +258,18 @@ def validate_storage_binding(
             and getattr(resolved_mount, "project_uuid", None) is not None
         ):
             expected = _binding_for_mount(resolved_mount)
-        if expected is not None and actual != expected:
+        if expected is not None and not storage_bindings_match(actual, expected):
+            diff = storage_binding_diff(actual, expected)
+            warnings_text = ""
+            if diff["metadata_warnings"]:
+                warnings_text = f" (warnings: {diff['metadata_warnings']})"
             return StorageValidationResult(
                 False,
                 path,
                 actual,
                 reason=(
-                    f"binding mismatch at {marker}: expected "
-                    "project/tool/mount/storage "
-                    f"{expected.project_uuid}/{expected.tool}/"
-                    f"{expected.mount}/{expected.storage}, "
-                    f"got {actual.project_uuid}/{actual.tool}/"
-                    f"{actual.mount}/{actual.storage}"
+                    f"binding mismatch at {marker}: "
+                    f"differences={diff['differences']}{warnings_text}"
                 ),
             )
         return StorageValidationResult(True, path, actual)
@@ -291,9 +293,11 @@ def initialize_config_binding(layout: Any) -> StorageBinding:
     marker = component.path / ".ledger-project.toml"
     if marker.exists():
         existing = read_storage_binding(marker)
-        if existing != binding:
+        if not storage_bindings_match(existing, binding):
+            diff = storage_binding_diff(existing, binding)
             raise StorageBindingError(
-                f"configuration binding marker {marker} belongs to another location"
+                f"configuration binding marker {marker} belongs to another location; "
+                f"differences: {diff['differences']}"
             )
         return existing
     write_storage_binding(marker, binding)
@@ -383,16 +387,90 @@ def validate_external_store(root: Path, *, allow_legacy: bool = True) -> Path:
     return marker
 
 
+@dataclass(frozen=True)
+class StorageBindingIdentity:
+    """Ownership identity of a storage binding, excluding informational metadata.
+
+    Project UUID (not project name) is the ownership identity. A project
+    rename must not invalidate owned storage.
+    """
+
+    schema_version: int
+    layout_version: int
+    project_uuid: str
+    tool: str
+    mount: str
+    storage: BindingStorage
+
+
+def storage_binding_identity(binding: StorageBinding) -> StorageBindingIdentity:
+    """Extract the ownership identity from a binding, ignoring project_name."""
+    return StorageBindingIdentity(
+        schema_version=binding.schema_version,
+        layout_version=binding.layout_version,
+        project_uuid=binding.project_uuid,
+        tool=binding.tool,
+        mount=binding.mount,
+        storage=binding.storage,
+    )
+
+
+def storage_bindings_match(actual: StorageBinding, expected: StorageBinding) -> bool:
+    """Compare two bindings by ownership identity, ignoring project_name."""
+    return storage_binding_identity(actual) == storage_binding_identity(expected)
+
+
+def storage_binding_diff(
+    actual: StorageBinding, expected: StorageBinding
+) -> dict[str, object]:
+    """Return a structured diff of two bindings for diagnostics.
+
+    Returns a dict with ``expected``, ``actual``, and ``differences`` keys.
+    If ``differences`` is empty, the bindings match by identity.
+    """
+    expected_identity = storage_binding_identity(expected)
+    actual_identity = storage_binding_identity(actual)
+    differences: dict[str, dict[str, object]] = {}
+    for field_name in (
+        "schema_version",
+        "layout_version",
+        "project_uuid",
+        "tool",
+        "mount",
+        "storage",
+    ):
+        ev = getattr(expected_identity, field_name)
+        av = getattr(actual_identity, field_name)
+        if ev != av:
+            differences[field_name] = {"expected": ev, "actual": av}
+    metadata_warnings: list[str] = []
+    if actual.project_name != expected.project_name:
+        metadata_warnings.append(
+            f"project_name: expected={expected.project_name!r}, "
+            f"actual={actual.project_name!r}"
+        )
+    return {
+        "expected": storage_binding_to_mapping(expected),
+        "actual": storage_binding_to_mapping(actual),
+        "differences": differences,
+        "metadata_warnings": metadata_warnings,
+    }
+
+
 __all__ = [
     "StorageBinding",
+    "StorageBindingIdentity",
     "StorageValidationReport",
     "StorageValidationResult",
     "initialize_config_binding",
     "initialize_external_store",
     "initialize_storage_binding",
     "read_storage_binding",
+    "storage_binding_diff",
     "storage_binding_from_mapping",
+    "storage_binding_identity",
     "storage_binding_to_mapping",
+    "storage_bindings_match",
     "validate_external_store",
     "validate_ledger_layout_storage",
     "validate_storage_binding",

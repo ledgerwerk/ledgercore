@@ -1,0 +1,7 @@
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "config"
+storage = "project"
+project_name = "ledgercore"

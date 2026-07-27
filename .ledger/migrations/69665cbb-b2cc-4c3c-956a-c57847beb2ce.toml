@@ -1,0 +1,88 @@
+schema_version = 2
+migration_id = "69665cbb-b2cc-4c3c-956a-c57847beb2ce"
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+phase = "failed"
+mode = "copy"
+verify = "sha256"
+project_root = "/data/data/com.termux/files/home/src/ledgercore"
+items_completed = 1
+source_removed = false
+error = "migration destination binding mismatch at /data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/data/.ledger-project.toml: expected 1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c/releaseledger/data/project"
+
+[items.0]
+component = "config"
+tool = "releaseledger"
+mount = "config"
+source = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/.migration/8ecb9c25-7eda-407a-8040-8d6aa213822e/config.toml"
+destination = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/config.toml"
+strategy = "copy"
+
+[items.0.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "config"
+storage = "project"
+project_name = "ledgercore"
+
+[items.0.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "config"
+storage = "project"
+project_name = "ledgercore"
+
+[items.1]
+component = "mount"
+tool = "releaseledger"
+mount = "data"
+source = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/.migration/8ecb9c25-7eda-407a-8040-8d6aa213822e/data"
+destination = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/data"
+strategy = "copy"
+
+[items.1.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "data"
+storage = "project"
+project_name = "ledgercore"
+
+[items.1.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "data"
+storage = "project"
+project_name = "ledgercore"
+
+[items.2]
+component = "mount"
+tool = "releaseledger"
+mount = "indexes"
+source = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/.migration/8ecb9c25-7eda-407a-8040-8d6aa213822e/data"
+destination = "/data/data/com.termux/files/home/.cache/ledgerwerk/releaseledger/1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c/ledgercore-9200dc52def7/indexes"
+strategy = "rebuild"
+
+[items.2.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "data"
+storage = "project"
+project_name = "ledgercore"
+
+[items.2.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "indexes"
+storage = "cache"
+project_name = "ledgercore"

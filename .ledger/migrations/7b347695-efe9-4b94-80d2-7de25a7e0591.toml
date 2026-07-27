@@ -1,0 +1,88 @@
+schema_version = 2
+migration_id = "7b347695-efe9-4b94-80d2-7de25a7e0591"
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+phase = "failed"
+mode = "copy"
+verify = "sha256"
+project_root = "/data/data/com.termux/files/home/src/ledgercore"
+items_completed = 0
+source_removed = false
+error = "config migration destination already exists: /data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/config.toml"
+
+[items.0]
+component = "config"
+tool = "releaseledger"
+mount = "config"
+source = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/.migration/dba4f769-d621-4c3b-80f5-1a8ce48494d2/config.toml"
+destination = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/config.toml"
+strategy = "copy"
+
+[items.0.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "config"
+storage = "project"
+project_name = "ledgercore"
+
+[items.0.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "config"
+storage = "project"
+project_name = "ledgercore"
+
+[items.1]
+component = "mount"
+tool = "releaseledger"
+mount = "data"
+source = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/.migration/dba4f769-d621-4c3b-80f5-1a8ce48494d2/data"
+destination = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/data"
+strategy = "copy"
+
+[items.1.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "data"
+storage = "project"
+project_name = "ledgercore"
+
+[items.1.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "data"
+storage = "project"
+project_name = "ledgercore"
+
+[items.2]
+component = "mount"
+tool = "releaseledger"
+mount = "indexes"
+source = "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/.migration/dba4f769-d621-4c3b-80f5-1a8ce48494d2/data"
+destination = "/data/data/com.termux/files/home/.cache/ledgerwerk/releaseledger/1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c/ledgercore-9200dc52def7/indexes"
+strategy = "rebuild"
+
+[items.2.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "data"
+storage = "project"
+project_name = "ledgercore"
+
+[items.2.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "1d41c550-f0e8-4d08-89ac-a2f7cc4f9c7c"
+tool = "releaseledger"
+mount = "indexes"
+storage = "cache"
+project_name = "ledgercore"

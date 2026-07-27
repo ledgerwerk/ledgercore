@@ -1,0 +1,6 @@
+{"schema": "releaseledger.migration-journal.v2", "phase": "staging", "migration_id": "d6fa1ca8-47a3-47ff-8acb-070bf5ed6b85", "plan_hash": "pending", "reason": "Migrate legacy .releaseledger to canonical .ledger/releaseledger/data layout", "legacy_data_root": "/data/data/com.termux/files/home/src/ledgercore/.releaseledger", "target_data_root": "/data/data/com.termux/files/home/src/ledgercore/.ledger/releaseledger/data", "source_fingerprint": "sha256:93d9f7d634139bde4fb9ba9fddb04951904cfe9e8fe7fde55e4c837f683342f3"}
+{"phase": "activation-prepared", "migration_id": "d6fa1ca8-47a3-47ff-8acb-070bf5ed6b85", "data_action": "replace", "config_action": "merge"}
+{"phase": "canonical-activated", "migration_id": "d6fa1ca8-47a3-47ff-8acb-070bf5ed6b85"}
+{"phase": "indexes-rebuilt", "migration_id": "d6fa1ca8-47a3-47ff-8acb-070bf5ed6b85"}
+{"phase": "domain-verified", "migration_id": "d6fa1ca8-47a3-47ff-8acb-070bf5ed6b85"}
+{"phase": "complete", "migration_id": "d6fa1ca8-47a3-47ff-8acb-070bf5ed6b85"}

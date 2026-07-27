@@ -23,8 +23,10 @@ from ledgercore.manifest import (
 from ledgercore.storage_binding import (
     StorageBinding,
     read_storage_binding,
+    storage_binding_diff,
     storage_binding_from_mapping,
     storage_binding_to_mapping,
+    storage_bindings_match,
     write_storage_binding,
 )
 from ledgercore.tomlio import write_ledger_local_config, write_ledger_manifest
@@ -199,12 +201,11 @@ def _validate_source(
         raise StorageMigrationError(
             f"invalid migration source binding {marker}: {exc}"
         ) from exc
-    if actual != expected:
+    if not storage_bindings_match(actual, expected):
+        diff = storage_binding_diff(actual, expected)
         raise StorageMigrationError(
-            f"migration source binding mismatch at {marker}: expected "
-            f"{expected.project_uuid}/{expected.tool}/{expected.mount}/"
-            f"{expected.storage}, got "
-            f"{actual.project_uuid}/{actual.tool}/{actual.mount}/{actual.storage}"
+            f"migration source binding mismatch at {marker}: "
+            f"differences={diff['differences']}"
         )
     return actual
 
@@ -224,10 +225,11 @@ def _validate_destination(path: Path, expected: StorageBinding) -> None:
             f"migration destination {path} is non-empty and unbound"
         )
     actual = read_storage_binding(marker)
-    if actual != expected:
+    if not storage_bindings_match(actual, expected):
+        diff = storage_binding_diff(actual, expected)
         raise StorageMigrationError(
-            f"migration destination binding mismatch at {marker}: expected "
-            f"{expected.project_uuid}/{expected.tool}/{expected.mount}/{expected.storage}"
+            f"migration destination binding mismatch at {marker}: "
+            f"differences={diff['differences']}"
         )
 
 
@@ -556,7 +558,7 @@ def execute_storage_migration(  # noqa: C901
                 _validate_destination(destination, item.destination_binding)
                 if destination.exists() and any(destination.iterdir()):
                     actual = read_storage_binding(destination / ".ledger-project.toml")
-                    if actual == item.destination_binding:
+                    if storage_bindings_match(actual, item.destination_binding):
                         completed += 1
                         _write_journal(
                             plan,
