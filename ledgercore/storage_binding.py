@@ -83,6 +83,8 @@ def storage_binding_from_mapping(
     source: str,
 ) -> StorageBinding:
     """Parse a StorageBinding from a plain mapping with full validation."""
+    if not isinstance(value, Mapping):
+        raise StorageBindingError(f"{source} must contain a TOML table")
     schema = _int(value.get("schema_version"), f"{source}: schema_version")
     layout = _int(value.get("layout_version"), f"{source}: layout_version")
     if schema != 1 or layout != 3:
@@ -114,7 +116,7 @@ def storage_binding_from_mapping(
 
 
 def _parse_binding(document: Any, path: Path) -> StorageBinding:
-    if not hasattr(document, "get"):
+    if not isinstance(document, Mapping):
         raise StorageBindingError(f"binding marker {path} must contain a TOML table")
     return storage_binding_from_mapping(document, source=str(path))
 

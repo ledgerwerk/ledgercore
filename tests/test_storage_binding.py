@@ -16,6 +16,7 @@ from ledgercore.storage_binding import (
     storage_binding_from_mapping,
     storage_binding_to_mapping,
     validate_ledger_layout_storage,
+    write_storage_binding,
 )
 
 UUID = "081c7c05-2d10-42b7-9b37-3d814c2f400a"
@@ -128,3 +129,19 @@ def test_mapping_rejects_invalid_schema_layout() -> None:
     mapping["schema_version"] = 99
     with pytest.raises(StorageBindingError):
         storage_binding_from_mapping(mapping, source="test")
+
+
+def test_marker_roundtrip_uses_mapping_helpers_for_optional_project_name(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / ".ledger-project.toml"
+    binding = _sample_binding(project_name="named-project")
+
+    write_storage_binding(marker, binding)
+
+    assert read_storage_binding(marker) == binding
+
+
+def test_mapping_rejects_non_table() -> None:
+    with pytest.raises(StorageBindingError):
+        storage_binding_from_mapping([], source="test")  # type: ignore[arg-type]
