@@ -210,6 +210,8 @@ __marimo__/
 
 ledgercore/_version.py
 .ledger/ledger.local.toml
+# Runtime-only Ledgercore migration lock.
+.ledger/migrations/write.lock
 
 context_ledgercore.md
 context_ledgercore.index.json

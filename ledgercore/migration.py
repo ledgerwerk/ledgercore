@@ -3451,21 +3451,35 @@ class MigrationLock:
     def acquire(self) -> None:
         """Acquire the migration lock."""
         self._lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_fd: int | None = None
         try:
-            import fcntl
+            lock_fd = os.open(
+                str(self._lock_file),
+                os.O_CREAT | os.O_WRONLY,
+                0o600,
+            )
+            try:
+                import fcntl
+            except ImportError:
+                # Windows: use msvcrt
+                import msvcrt
 
-            self._lock_fd = os.open(str(self._lock_file), os.O_CREAT | os.O_WRONLY)
-            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Write migration_id to lock file for diagnostics
-            os.write(self._lock_fd, self._migration_id.encode())
-            os.fsync(self._lock_fd)
-        except ImportError:
-            # Windows: use msvcrt
-            import msvcrt
-
-            self._lock_fd = os.open(str(self._lock_file), os.O_CREAT | os.O_WRONLY)
-            msvcrt.locking(self._lock_fd, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+                msvcrt.locking(lock_fd, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+            else:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                os.fchmod(lock_fd, 0o600)
+                # Replace stale diagnostics only after acquiring the lock.
+                os.ftruncate(lock_fd, 0)
+                os.lseek(lock_fd, 0, os.SEEK_SET)
+                os.write(lock_fd, self._migration_id.encode())
+                os.fsync(lock_fd)
+            self._lock_fd = lock_fd
         except OSError as exc:
+            if lock_fd is not None:
+                try:
+                    os.close(lock_fd)
+                except OSError:
+                    pass
             raise StorageMigrationError(
                 f"could not acquire migration lock: {exc}",
                 code="STORAGE_MIGRATION_LOCKED",

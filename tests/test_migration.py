@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from ledgercore.manifest import (
     parse_ledger_manifest_v3,
 )
 from ledgercore.migration import (
+    MigrationLock,
     _check_same_filesystem,
     execute_storage_migration,
     inspect_storage_migration,
@@ -596,3 +599,19 @@ def test_existing_behavior_planning_no_writes(tmp_path: Path) -> None:
     plan = plan_storage_migration(current, manifest, target, "taskledger")
     assert plan.items[0].strategy == "copy"
     assert not (project / ".ledger/migrations").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits and flock semantics")
+def test_migration_lock_is_private_and_replaces_stale_diagnostics(
+    tmp_path: Path,
+) -> None:
+    lock_path = tmp_path / ".ledger" / "migrations" / "write.lock"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text("long-stale-migration-id", encoding="utf-8")
+    lock_path.chmod(0o755)
+
+    with MigrationLock(tmp_path, "new-id"):
+        assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+        assert lock_path.read_text(encoding="utf-8") == "new-id"
+
+    assert lock_path.exists()
