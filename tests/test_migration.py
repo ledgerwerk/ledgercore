@@ -15,6 +15,7 @@ from ledgercore.manifest import (
     parse_ledger_manifest_v3,
 )
 from ledgercore.migration import (
+    _check_same_filesystem,
     execute_storage_migration,
     inspect_storage_migration,
     plan_storage_migration,
@@ -111,6 +112,16 @@ def _make_plan_external_to_user_data(tmp_path: Path) -> tuple:
         if dest.exists():
             shutil.rmtree(dest)
     return plan, locator, manifest, layout, project
+
+
+def test_filesystem_check_uses_existing_ancestor_for_absent_paths(
+    tmp_path: Path,
+) -> None:
+    """Generated migration paths may not exist during preflight."""
+    assert _check_same_filesystem(
+        tmp_path / "not-created-a" / "data",
+        tmp_path / "not-created-b" / "data",
+    )
 
 
 def test_binding_identity_regression_external_to_user_data(tmp_path: Path) -> None:

@@ -1417,11 +1417,34 @@ def _hash_tree(path: Path) -> dict[str, str]:
 
 
 def _check_same_filesystem(path_a: Path, path_b: Path) -> bool:
-    """Check if two paths are on the same filesystem."""
+    """Check if two paths are on the same filesystem.
+
+    Migration stage and backup paths are deliberately created alongside the
+    destination, so their parent may not exist during preflight.  In that
+    case, stat the nearest existing ancestor; the filesystem containing that
+    ancestor is also the one a later mkdir/rename will use.
+    """
+
+    def existing_ancestor(path: Path) -> Path | None:
+        candidate = path
+        while True:
+            try:
+                candidate.stat()
+                return candidate
+            except FileNotFoundError:
+                parent = candidate.parent
+                if parent == candidate:
+                    return None
+                candidate = parent
+            except OSError:
+                return None
+
+    anchor_a = existing_ancestor(path_a)
+    anchor_b = existing_ancestor(path_b)
+    if anchor_a is None or anchor_b is None:
+        return False
     try:
-        stat_a = path_a.stat()
-        stat_b = path_b.stat()
-        return stat_a.st_dev == stat_b.st_dev
+        return anchor_a.stat().st_dev == anchor_b.stat().st_dev
     except OSError:
         return False
 
