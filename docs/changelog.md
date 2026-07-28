@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Completed copy-only schema-3 migration execution, lifecycle hooks, transactional
+  configuration switching, typed inspection, policy-driven recovery/rollback,
+  and framework-neutral inspect/recover CLI contracts for Releaseledger.
+
 - Added DestinationPrecondition dataclass for typed before-state fingerprints
 - Added MigrationPhase and MigrationItemState enums for schema-3 state machine
 - Added Schema3MigrationJournal, Schema3ItemJournalState, Schema3ConfigSwitchState dataclasses

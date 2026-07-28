@@ -144,11 +144,38 @@ Execution defaults to copy-only mode. Destructive `mode="move"` is disabled in
 0.5.1 because source cleanup is not safely recoverable. Durable mounts require
 the downstream quiescence callback.
 
-Execution uses a temporary sibling directory, refuses unexpected symlinks,
-writes the destination binding, verifies regular files, switches configuration
-atomically, and retains the source after successful activation. A schema-2
-journal is stored under `.ledger/migrations/<migration-id>.toml` with phases
-`planned`, `copying`, `verified`, `config-switched`, `complete`, or `failed`.
+Execution is a copy-only transaction. It refuses unexpected symlinks, source or
+destination aliasing, foreign ownership, path collisions, and cross-filesystem
+activation. It stages beside the activation target, writes destination bindings,
+verifies deterministic fingerprints, creates an owned backup before replacing an
+owned destination, and activates with durable atomic renames. Sources are never
+removed or modified.
+
+New executions write a schema-3 journal under
+`.ledger/migrations/<migration-id>.toml`. The journal is the recovery source of
+truth and records the canonical plan digest, normalized paths, binding identity,
+lock owner, hook requirements/completions, config-switch intent/application/
+verification, bounded errors, and every phase/item transition:
+
+```text
+planned → staging → staged → activating → items-activated →
+config-switching → config-switched → post-verifying → committed →
+cleaning-up → complete
+```
+
+Item intent is persisted before each physical operation. A completion state is
+written only after the operation and its fingerprint/binding verification pass.
+Schema-3 journals are written atomically with file and directory fsync where the
+platform supports it. Schema-1 and schema-2 journals remain readable for
+compatibility but are never silently upgraded or treated as schema 3.
+
+Directory fingerprints use `sha256-tree-v1`: children are traversed recursively
+in case-sensitive POSIX-relative lexical order; directory entries encode their
+relative path, regular files encode relative path, byte length, and content
+SHA-256; UTF-8 path encoding is used; symlinks and special files are rejected;
+the root `.ledger-project.toml` marker is excluded. File fingerprints use
+`sha256-file-v1` and encode byte length plus content SHA-256, independent of the
+file name. The result also records file count and total bytes.
 
 Journal schema 2 persists exact source and destination binding identity,
 execution mode, verification mode, project root, items completed, and source
@@ -169,6 +196,46 @@ Schema 2 can be read for migration. `plan_schema_v2_to_v3` provides conservative
 conversion for simple layouts. Schema-2 provider, namespace, custom path, and
 scope combinations that cannot be mapped safely require an operator decision.
 Writers emit schema 3 only. Schema 2 is deprecated outside explicit migration.
+
+### Recovery procedure
+
+Inspect before choosing a policy:
+
+```python
+from ledgercore import inspect_storage_migration, recover_storage_migration
+
+assessment = recover_storage_migration(journal_path, dry_run=True)
+print(assessment.recommendation, assessment.blockers)
+```
+
+`auto` resumes only when every unresolved operation and owned path is provable;
+otherwise it requests manual intervention without mutation. `resume` is
+idempotent and reruns required idempotent hooks. `rollback` restores only owned
+backups/configuration whose current fingerprints still match, removes only
+journal-owned temporary paths, and preserves sources. A foreign change produces
+`STORAGE_MIGRATION_ROLLBACK_CONFLICT`. `dry_run=True` performs assessment and
+precondition checks only: it does not acquire a mutating lock, write a journal,
+switch configuration, or change storage.
+
+The framework-neutral CLI adapter exposes the same operation:
+
+```text
+ledgercore migrate inspect --journal PATH
+ledgercore migrate recover --journal PATH --policy auto|resume|rollback [--dry-run]
+```
+
+Downstream CLI applications register these handlers with their own parser and
+terminal framework. JSON responses use `ledgerwerk.cli.v1` and include phase,
+recommended action, blockers, journal path, stable error code, and exit category.
+
+### Releaseledger handoff
+
+Releaseledger should construct `StorageMigrationPlan` and
+`StorageMigrationHooks`, call `execute_storage_migration(..., hooks=hooks)`, and
+delegate `inspect_storage_migration`/`recover_storage_migration` to Ledgercore.
+It may retain project-specific planning, policy, receipt presentation, and CLI
+orchestration, but must not inspect stage/backup internals or duplicate copying,
+activation, rollback, configuration switching, or journal logic.
 
 ## Compatibility
 

@@ -12,9 +12,17 @@ from .deprecation import (
     deprecated_option_warning,
 )
 from .envelope import ErrorEnvelope, SuccessEnvelope
-from .errors import CLIError, ExitCode
+from .errors import CLIError, ExitCode, cli_error_from_exception
 from .inventory import CommandInventory, CommandMetadata
-from .migrate import MigrationCapabilities, MigrationHandler
+from .migrate import (
+    MigrationCapabilities,
+    MigrationCommandResponse,
+    MigrationHandler,
+    inspect_migration,
+    migrate_inspect,
+    migrate_recover,
+    recover_migration,
+)
 from .model import CommonCLIState
 
 __all__ = [
@@ -25,8 +33,14 @@ __all__ = [
     "CommonCLIState",
     "ErrorEnvelope",
     "ExitCode",
+    "cli_error_from_exception",
     "MigrationCapabilities",
     "MigrationHandler",
+    "MigrationCommandResponse",
+    "inspect_migration",
+    "migrate_inspect",
+    "migrate_recover",
+    "recover_migration",
     "SuccessEnvelope",
     "deprecated_command_warning",
     "deprecated_executable_warning",

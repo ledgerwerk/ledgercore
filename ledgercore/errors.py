@@ -48,6 +48,18 @@ class StorageMigrationError(StorageError):
     code: str = "STORAGE_MIGRATION_ERROR"
 
 
+class StorageMigrationPlanError(StorageMigrationError):
+    code = "STORAGE_MIGRATION_PLAN_INVALID"
+
+
+class StorageMigrationJournalError(StorageMigrationError):
+    code = "STORAGE_MIGRATION_JOURNAL_INVALID"
+
+
+class StorageMigrationRecoveryError(StorageMigrationError):
+    code = "STORAGE_MIGRATION_RECOVERY_FAILED"
+
+
 class AtomicWriteError(StorageError):
     """Raised when an atomic write operation fails."""
 

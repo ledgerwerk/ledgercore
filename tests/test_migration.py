@@ -124,7 +124,7 @@ def test_binding_identity_regression_external_to_user_data(tmp_path: Path) -> No
     assert result.phase == "complete"
     assert result.source_removed is False
     journal = inspect_storage_migration(result.journal_path)
-    assert journal.schema_version == 2
+    assert journal.schema_version == 3
     assert journal.items[0].source_binding is not None
     assert journal.items[0].destination_binding is not None
     assert journal.items[0].source_binding.storage == "external"
@@ -380,14 +380,14 @@ def test_incomplete_recovery_raises_manual_intervention(tmp_path: Path) -> None:
 
 
 def test_failure_journal(tmp_path: Path) -> None:
-    """Failure during execution records a schema-2 failed journal."""
+    """Failure during execution records a schema-3 failed journal."""
     plan, _, _, _, project = _make_plan_external_to_user_data(tmp_path)
     call_count = 0
 
     def failing_quiescence() -> None:
         nonlocal call_count
         call_count += 1
-        if call_count > 1:
+        if call_count >= 1:
             raise RuntimeError("quiescence failure")
 
     with pytest.raises((RuntimeError, StorageMigrationError)):
@@ -402,7 +402,7 @@ def test_failure_journal(tmp_path: Path) -> None:
     journals = list(migrations_dir.glob("*.toml"))
     assert len(journals) == 1
     journal = inspect_storage_migration(journals[0])
-    assert journal.schema_version == 2
+    assert journal.schema_version == 3
     assert journal.phase == "failed"
     assert journal.source_removed is False
     assert journal.error is not None

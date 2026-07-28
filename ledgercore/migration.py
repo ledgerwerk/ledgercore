@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -30,7 +31,11 @@ from ledgercore.storage_binding import (
     storage_bindings_match,
     write_storage_binding,
 )
-from ledgercore.tomlio import write_ledger_local_config, write_ledger_manifest
+from ledgercore.time import utc_now_iso
+from ledgercore.tomlio import (
+    render_ledger_local_config,
+    render_ledger_manifest,
+)
 
 MigrationStrategy = Literal["copy", "rebuild", "noop"]
 MigrationMode = Literal["copy", "move"]
@@ -98,15 +103,15 @@ _PHASE_TRANSITIONS: dict[str, set[str]] = {
     "complete": set(),
     "rolling-back": {"rolled-back", "failed"},
     "rolled-back": set(),
-    "failed": set(),
+    "failed": {"staging", "activating", "config-switching", "rolling-back"},
 }
 
 # Schema-3 valid item state transitions
 _ITEM_STATE_TRANSITIONS: dict[str, set[str]] = {
-    "pending": {"staging", "rollback-intent", "cleanup-pending"},
+    "pending": {"staging", "rollback-intent", "cleanup-pending", "complete"},
     "staging": {"staged", "rollback-intent"},
     "staged": {"stage-verified", "rollback-intent"},
-    "stage-verified": {"backup-intent", "rollback-intent"},
+    "stage-verified": {"backup-intent", "activation-intent", "rollback-intent"},
     "backup-intent": {"backup-created", "rollback-intent"},
     "backup-created": {"activation-intent", "rollback-intent"},
     "activation-intent": {"activated", "rollback-intent"},
@@ -195,6 +200,40 @@ class StorageFingerprint:
         """Return a portable encoded representation: 'algorithm:digest'."""
         return f"{self.algorithm}:{self.digest}"
 
+    def to_mapping(self) -> dict[str, object]:
+        """Return the stable journal representation of this fingerprint."""
+        return {
+            "algorithm": self.algorithm,
+            "digest": self.digest,
+            "file_count": self.file_count,
+            "total_bytes": self.total_bytes,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, object]) -> StorageFingerprint:
+        """Parse a fingerprint and reject malformed journal values."""
+        algorithm = value.get("algorithm")
+        digest = value.get("digest")
+        file_count = value.get("file_count")
+        total_bytes = value.get("total_bytes")
+        if (
+            algorithm not in {"sha256-tree-v1", "sha256-file-v1"}
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or isinstance(file_count, bool)
+            or not isinstance(file_count, int)
+            or file_count < 0
+            or isinstance(total_bytes, bool)
+            or not isinstance(total_bytes, int)
+            or total_bytes < 0
+        ):
+            raise StorageMigrationError(
+                "invalid storage fingerprint",
+                code="STORAGE_MIGRATION_JOURNAL_INVALID",
+            )
+        return cls(cast(Any, algorithm), digest, file_count, total_bytes)
+
 
 @dataclass(frozen=True, slots=True)
 class StorageFingerprintEntry:
@@ -271,6 +310,7 @@ def _walk_directory_for_inventory(
 def fingerprint_storage_directory(
     path: Path,
     *,
+    algorithm: str = "sha256",
     ignored_relative_paths: frozenset[str] = frozenset({".ledger-project.toml"}),
 ) -> StorageFingerprint:
     """Compute a deterministic sha256-tree-v1 fingerprint of a directory.
@@ -282,6 +322,11 @@ def fingerprint_storage_directory(
     Paths are in POSIX relative form. Entries are sorted in POSIX-relative
     lexical order. Symlinks and special files are rejected.
     """
+    if algorithm != "sha256":
+        raise StorageMigrationError(
+            f"unsupported fingerprint algorithm {algorithm!r}",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+        )
     entries = _inventory_storage_directory(
         path, ignored_relative_paths=ignored_relative_paths
     )
@@ -307,12 +352,19 @@ def fingerprint_storage_directory(
     )
 
 
-def fingerprint_storage_file(path: Path) -> StorageFingerprint:
+def fingerprint_storage_file(
+    path: Path, *, algorithm: str = "sha256"
+) -> StorageFingerprint:
     """Compute a deterministic sha256-file-v1 fingerprint of a regular file.
 
     The canonical representation is path-independent:
         F\\0<size>\\0<content-sha256>
     """
+    if algorithm != "sha256":
+        raise StorageMigrationError(
+            f"unsupported fingerprint algorithm {algorithm!r}",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+        )
     if not path.exists():
         raise StorageMigrationError(f"fingerprint target {path} does not exist")
     if path.is_symlink() or not path.is_file():
@@ -343,10 +395,12 @@ class StorageDestinationInspection:
 
 
 def inspect_storage_migration_destination(
+    item: StorageMigrationItem | None = None,
     *,
-    path: Path,
-    kind: DestinationKind,
-    expected_binding: StorageBinding,
+    path: Path | None = None,
+    kind: DestinationKind | None = None,
+    expected_binding: StorageBinding | None = None,
+    project_root: Path | None = None,
 ) -> StorageDestinationInspection:
     """Inspect a migration destination and classify its current state.
 
@@ -361,6 +415,24 @@ def inspect_storage_migration_destination(
     For config files:
         - inspect the parent directory binding and file type.
     """
+    if item is not None:
+        if path is not None or kind is not None or expected_binding is not None:
+            raise StorageMigrationError(
+                "destination inspection item conflicts with explicit arguments",
+                code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+            )
+        path = item.destination
+        kind = item.destination_kind or (
+            "file" if item.component == "config" else "directory"
+        )
+        expected_binding = item.destination_binding
+    if path is None or kind is None or expected_binding is None:
+        raise StorageMigrationError(
+            "destination inspection requires an item or path, kind, and binding",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+        )
+    if project_root is not None and not path.is_absolute():
+        path = project_root / path
     if kind == "file":
         return _inspect_config_destination(path, expected_binding)
     return _inspect_directory_destination(path, expected_binding)
@@ -590,7 +662,10 @@ class StorageMigrationPlan:
     project_uuid: str
     items: tuple[StorageMigrationItem, ...]
     config_changes: LedgerLocalOverrides | LedgerProjectManifest
-    warnings: tuple[str, ...]
+    warnings: tuple[str, ...] = ()
+    schema_version: int = 3
+    project_root: Path | None = None
+    config_switch_metadata: tuple[Mapping[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -610,6 +685,13 @@ class StorageMigrationPlanValidation:
     valid: bool
     items: tuple[StorageMigrationItemValidation, ...]
     errors: tuple[str, ...]
+    structural_errors: tuple[str, ...] = ()
+    source_precondition_errors: tuple[str, ...] = ()
+    destination_precondition_errors: tuple[str, ...] = ()
+    collisions: tuple[str, ...] = ()
+    unsupported_strategies: tuple[str, ...] = ()
+    filesystem_errors: tuple[str, ...] = ()
+    no_op: bool = False
 
 
 @dataclass(frozen=True)
@@ -619,6 +701,12 @@ class StorageMigrationResult:
     items_completed: int
     source_removed: bool | None
     journal_path: Path
+    item_outcomes: tuple[Mapping[str, object], ...] = ()
+    fingerprints: tuple[StorageFingerprint, ...] = ()
+    config_switched: bool = False
+    cleanup_complete: bool = False
+    error_code: str | None = None
+    recommendation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -650,6 +738,9 @@ class Schema3ItemJournalState:
     destination: Path
     strategy: MigrationStrategy
     destination_policy: DestinationPolicy
+    source_binding: StorageBinding | None = None
+    destination_binding: StorageBinding | None = None
+    expected_before_state: DestinationState | None = None
     state: MigrationItemState = "pending"
     source_fingerprint: StorageFingerprint | None = None
     expected_before_fingerprint: StorageFingerprint | None = None
@@ -672,6 +763,11 @@ class Schema3ConfigSwitchState:
     target_fingerprint: StorageFingerprint | None = None
     backup_path: Path | None = None
     error: str | None = None
+    intent_written: bool = False
+    applied: bool = False
+    verified: bool = False
+    previous_content: str | None = None
+    target_content: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -691,6 +787,56 @@ class Schema3MigrationJournal:
     requires_activated_validation: bool = False
     requires_finalization: bool = False
     cleanup_warnings: tuple[str, ...] = ()
+    plan_digest: str | None = None
+    lock_identity: Mapping[str, object] = field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+    config_switch_state: Mapping[str, object] | None = None
+    manual_intervention_reason: str | None = None
+    quiescence_completed: bool = False
+    staged_validated: tuple[int, ...] = ()
+    activated_validated: tuple[int, ...] = ()
+    finalized: bool = False
+
+    @property
+    def schema_version(self) -> int:
+        return 3
+
+    @property
+    def items_completed(self) -> int:
+        return sum(item.state == "complete" for item in self.items)
+
+    @property
+    def source_removed(self) -> bool:
+        return False
+
+    @property
+    def recovery_capability(self) -> MigrationRecoveryCapability:
+        if self.phase == "complete":
+            return "completed-only"
+        return "manual-intervention"
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryAssessment:
+    """Non-mutating assessment of a schema-3 journal and its filesystem."""
+
+    migration_id: str
+    journal_path: Path
+    phase: str
+    item_states: tuple[MigrationItemState, ...]
+    owned_paths: tuple[Path, ...]
+    blockers: tuple[str, ...] = ()
+    recommendation: Literal["resume", "rollback", "complete", "manual-intervention"] = (
+        "manual-intervention"
+    )
+    resumable: bool = False
+    rollbackable: bool = False
+    complete: bool = False
+
+    @property
+    def requires_manual_intervention(self) -> bool:
+        return self.recommendation == "manual-intervention"
 
 
 def _binding(layout: Any, mount_name: str, storage: str) -> StorageBinding:
@@ -716,6 +862,24 @@ class StorageMigrationHooks:
     requires_staged_validation: bool = False
     requires_activated_validation: bool = False
     requires_finalization: bool = False
+
+    def validate_requirements(self) -> None:
+        """Validate required callback presence before filesystem mutation."""
+        required = (
+            (self.requires_staged_validation, self.validate_staged, "validate_staged"),
+            (
+                self.requires_activated_validation,
+                self.validate_activated,
+                "validate_activated",
+            ),
+            (self.requires_finalization, self.finalize, "finalize"),
+        )
+        for enabled, callback, name in required:
+            if enabled and callback is None:
+                raise StorageMigrationError(
+                    f"required migration hook {name} is not provided",
+                    code="STORAGE_MIGRATION_HOOK_REQUIRED",
+                )
 
 
 def _validate_source(
@@ -1054,6 +1218,24 @@ def _check_path_overlaps(
     for i, item in enumerate(items):
         destinations.append((i, item.destination.resolve()))
 
+    # A copy-only migration cannot safely use a source path as, or below,
+    # another item's activation target. This also prevents a source from being
+    # changed by a sibling activation while it is being copied.
+    sources = [(i, item.source.resolve()) for i, item in enumerate(items)]
+    for source_index, source in sources:
+        for dest_index, destination in destinations:
+            if source_index == dest_index and source == destination:
+                continue
+            if (
+                source == destination
+                or source.is_relative_to(destination)
+                or destination.is_relative_to(source)
+            ):
+                errors.append(
+                    f"item {source_index} source {source} aliases item "
+                    f"{dest_index} destination {destination}"
+                )
+
     # Check destination overlaps
     for i, (_, dest_a) in enumerate(destinations):
         for j, (_, dest_b) in enumerate(destinations):
@@ -1154,6 +1336,14 @@ def _validate_plan_structure(
             errors.append(
                 f"item {i}: unknown destination_kind {item.destination_kind!r}"
             )
+
+        if item.expected_before.state not in {"absent", "empty-unbound", "owned"}:
+            errors.append(f"item {i}: invalid expected destination state")
+        if (
+            item.expected_before.state == "owned"
+            and item.expected_before.fingerprint is None
+        ):
+            errors.append(f"item {i}: owned destination requires a fingerprint")
 
         # Validate tool_name and mount_name are not empty
         if not item.tool_name:
@@ -1352,6 +1542,156 @@ def _journal_path(plan: StorageMigrationPlan, project_root: Path) -> Path:
     return project_root / ".ledger" / "migrations" / f"{plan.migration_id}.toml"
 
 
+def _canonical_value(value: object) -> object:
+    """Convert plan values to a deterministic JSON-compatible structure."""
+    if isinstance(value, Path):
+        return str(value.resolve(strict=False))
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonical_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (tuple, list, set, frozenset)):
+        values = [_canonical_value(item) for item in value]
+        if isinstance(value, (set, frozenset)):
+            values.sort(key=lambda item: json.dumps(item, sort_keys=True, default=str))
+        return values
+    if hasattr(value, "__dataclass_fields__"):
+        return {
+            name: _canonical_value(getattr(value, name))
+            for name in value.__dataclass_fields__
+        }
+    if hasattr(value, "value") and not isinstance(value, (str, bytes)):
+        enum_value = value.value
+        if enum_value is not value:
+            return _canonical_value(enum_value)
+    return value
+
+
+def storage_migration_plan_digest(plan: StorageMigrationPlan) -> str:
+    """Return the stable SHA-256 digest persisted in schema-3 journals."""
+    payload = {
+        "schema_version": plan.schema_version,
+        "migration_id": plan.migration_id,
+        "project_uuid": plan.project_uuid,
+        "project_root": _canonical_value(plan.project_root),
+        "items": _canonical_value(plan.items),
+        "config_changes": _canonical_value(plan.config_changes),
+        "config_switch_metadata": _canonical_value(plan.config_switch_metadata),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _schema3_item_from_plan(
+    item: StorageMigrationItem,
+    index: int,
+    paths: MigrationItemPaths,
+) -> Schema3ItemJournalState:
+    return Schema3ItemJournalState(
+        item_index=index,
+        component=item.component,
+        tool_name=item.tool_name,
+        mount_name=item.mount_name,
+        source=item.source.resolve(strict=False),
+        destination=item.destination.resolve(strict=False),
+        strategy=item.strategy,
+        destination_policy=item.destination_policy,
+        source_binding=item.source_binding,
+        destination_binding=item.destination_binding,
+        expected_before_state=item.expected_before.state,
+        source_fingerprint=item.expected_source_fingerprint,
+        expected_before_fingerprint=item.expected_before.fingerprint,
+        expected_target_fingerprint=item.expected_target_fingerprint,
+        stage_path=paths.stage.resolve(strict=False),
+        backup_path=paths.backup.resolve(strict=False),
+    )
+
+
+def _schema3_journal_from_plan(
+    plan: StorageMigrationPlan,
+    *,
+    root: Path,
+    mode: MigrationMode,
+    verify: VerifyMode,
+    hooks: StorageMigrationHooks,
+) -> Schema3MigrationJournal:
+    items = tuple(
+        _schema3_item_from_plan(
+            item, index, _prepare_item_paths(item.destination, plan.migration_id, index)
+        )
+        for index, item in enumerate(plan.items)
+    )
+    now = utc_now_iso()
+    return Schema3MigrationJournal(
+        migration_id=plan.migration_id,
+        project_uuid=plan.project_uuid,
+        phase="planned",
+        mode=mode,
+        verify=verify,
+        project_root=root.resolve(strict=False),
+        items=items,
+        requires_staged_validation=hooks.requires_staged_validation,
+        requires_activated_validation=hooks.requires_activated_validation,
+        requires_finalization=hooks.requires_finalization,
+        plan_digest=storage_migration_plan_digest(plan),
+        lock_identity={
+            "migration_id": plan.migration_id,
+            "owner": "ledgercore",
+            "pid": os.getpid(),
+        },
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _persist_schema3(journal: Schema3MigrationJournal, path: Path) -> None:
+    """Persist one complete schema-3 transition atomically and durably."""
+    updated = replace(journal, updated_at=utc_now_iso())
+    write_schema3_journal(updated, path)
+
+
+def _transition_phase(
+    journal: Schema3MigrationJournal,
+    phase: MigrationPhase,
+) -> Schema3MigrationJournal:
+    if phase == journal.phase:
+        return journal
+    allowed = _PHASE_TRANSITIONS.get(journal.phase, set())
+    if phase not in allowed:
+        raise StorageMigrationError(
+            f"invalid migration phase transition {journal.phase!r} -> {phase!r}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    return replace(journal, phase=phase)
+
+
+def _transition_item(
+    journal: Schema3MigrationJournal,
+    item_index: int,
+    state: MigrationItemState,
+    **changes: Any,
+) -> Schema3MigrationJournal:
+    items = list(journal.items)
+    try:
+        current = items[item_index]
+    except IndexError as exc:
+        raise StorageMigrationError(
+            f"unknown migration item {item_index}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        ) from exc
+    if state != current.state and state not in _ITEM_STATE_TRANSITIONS.get(
+        current.state, set()
+    ):
+        raise StorageMigrationError(
+            f"invalid item {item_index} state transition "
+            f"{current.state!r} -> {state!r}",
+            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+        )
+    items[item_index] = replace(current, state=state, **changes)
+    return replace(journal, items=tuple(items))
+
+
 def _write_journal(
     plan: StorageMigrationPlan,
     path: Path,
@@ -1417,12 +1757,30 @@ def _fingerprint_from_toml(data: dict[str, Any] | None) -> StorageFingerprint | 
     """Parse a StorageFingerprint from a TOML dict."""
     if data is None:
         return None
-    return StorageFingerprint(
-        algorithm=data["algorithm"],
-        digest=data["digest"],
-        file_count=data["file_count"],
-        total_bytes=data["total_bytes"],
-    )
+    try:
+        return StorageFingerprint.from_mapping(data)
+    except (KeyError, TypeError, StorageMigrationError) as exc:
+        raise _journal_invalid("invalid fingerprint record") from exc
+
+
+def _binding_to_toml(binding: StorageBinding | None) -> Any:
+    if binding is None:
+        return None
+    result = table()
+    for key, value in storage_binding_to_mapping(binding).items():
+        result.add(key, value)
+    return result
+
+
+def _binding_from_toml(value: object, *, context: str) -> StorageBinding | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise _journal_invalid(f"{context} binding must be a table")
+    try:
+        return storage_binding_from_mapping(value, source=context)
+    except StorageBindingError as exc:
+        raise _journal_invalid(f"{context} has invalid binding: {exc}") from exc
 
 
 def _serialize_journal_item(item: Schema3ItemJournalState) -> Any:
@@ -1437,6 +1795,12 @@ def _serialize_journal_item(item: Schema3ItemJournalState) -> Any:
     row.add("strategy", item.strategy)
     row.add("destination_policy", item.destination_policy)
     row.add("state", item.state)
+    if item.source_binding is not None:
+        row.add("source_binding", _binding_to_toml(item.source_binding))
+    if item.destination_binding is not None:
+        row.add("destination_binding", _binding_to_toml(item.destination_binding))
+    if item.expected_before_state is not None:
+        row.add("expected_before_state", item.expected_before_state)
 
     if item.source_fingerprint is not None:
         row.add("source_fingerprint", _fingerprint_to_toml(item.source_fingerprint))
@@ -1483,6 +1847,13 @@ def _serialize_config_switch(sw: Schema3ConfigSwitchState) -> Any:
         row.add("backup_path", str(sw.backup_path))
     if sw.error is not None:
         row.add("error", sw.error)
+    row.add("intent_written", sw.intent_written)
+    row.add("applied", sw.applied)
+    row.add("verified", sw.verified)
+    if sw.previous_content is not None:
+        row.add("previous_content", sw.previous_content)
+    if sw.target_content is not None:
+        row.add("target_content", sw.target_content)
     return row
 
 
@@ -1505,6 +1876,28 @@ def write_schema3_journal(
     doc.add("requires_staged_validation", journal.requires_staged_validation)
     doc.add("requires_activated_validation", journal.requires_activated_validation)
     doc.add("requires_finalization", journal.requires_finalization)
+    doc.add("quiescence_completed", journal.quiescence_completed)
+    doc.add("staged_validated", list(journal.staged_validated))
+    doc.add("activated_validated", list(journal.activated_validated))
+    doc.add("finalized", journal.finalized)
+    if journal.plan_digest is not None:
+        doc.add("plan_digest", journal.plan_digest)
+    if journal.lock_identity:
+        lock = table()
+        for key, value in journal.lock_identity.items():
+            lock.add(key, value)
+        doc.add("lock_identity", lock)
+    if journal.created_at is not None:
+        doc.add("created_at", journal.created_at)
+    if journal.updated_at is not None:
+        doc.add("updated_at", journal.updated_at)
+    if journal.config_switch_state is not None:
+        switch_state = table()
+        for key, value in journal.config_switch_state.items():
+            switch_state.add(key, value)
+        doc.add("config_switch_state", switch_state)
+    if journal.manual_intervention_reason is not None:
+        doc.add("manual_intervention_reason", journal.manual_intervention_reason)
     if journal.cleanup_warnings:
         warnings = table()
         for i, w in enumerate(journal.cleanup_warnings):
@@ -1530,7 +1923,7 @@ def write_schema3_journal(
     atomic_write_text(path, text)
 
 
-def _parse_schema3_journal(
+def _parse_schema3_journal(  # noqa: C901
     document: Mapping[str, object],
     journal_path: Path,
 ) -> Schema3MigrationJournal:
@@ -1542,6 +1935,10 @@ def _parse_schema3_journal(
     phase = _journal_string(document, "phase", context=context)
     mode = _journal_string(document, "mode", context=context)
     verify = _journal_string(document, "verify", context=context)
+    if mode != "copy":
+        raise _journal_invalid(f"{context}: unsupported mode {mode!r}")
+    if verify not in {"sha256", "size"}:
+        raise _journal_invalid(f"{context}: unsupported verify mode {verify!r}")
 
     # Validate phase
     valid_phases = set(MigrationPhase.__args__)  # type: ignore[attr-defined]
@@ -1561,6 +1958,44 @@ def _parse_schema3_journal(
     requires_staged = bool(document.get("requires_staged_validation", False))
     requires_activated = bool(document.get("requires_activated_validation", False))
     requires_final = bool(document.get("requires_finalization", False))
+    quiescence_completed = document.get("quiescence_completed", False)
+    finalized = document.get("finalized", False)
+    if not isinstance(quiescence_completed, bool) or not isinstance(finalized, bool):
+        raise _journal_invalid(f"{context}: hook completion flags must be booleans")
+
+    def _hook_indexes(name: str) -> tuple[int, ...]:
+        raw = document.get(name, [])
+        if not isinstance(raw, list) or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in raw
+        ):
+            raise _journal_invalid(f"{context}: {name} must be a list of indexes")
+        return tuple(raw)
+
+    staged_validated = _hook_indexes("staged_validated")
+    activated_validated = _hook_indexes("activated_validated")
+    plan_digest = document.get("plan_digest")
+    if plan_digest is not None and not isinstance(plan_digest, str):
+        raise _journal_invalid(f"{context}: plan_digest must be a string")
+    lock_identity_raw = document.get("lock_identity", {})
+    if not isinstance(lock_identity_raw, Mapping):
+        raise _journal_invalid(f"{context}: lock_identity must be a table")
+    created_at = document.get("created_at")
+    updated_at = document.get("updated_at")
+    if created_at is not None and not isinstance(created_at, str):
+        raise _journal_invalid(f"{context}: created_at must be a string")
+    if updated_at is not None and not isinstance(updated_at, str):
+        raise _journal_invalid(f"{context}: updated_at must be a string")
+    config_switch_state_raw = document.get("config_switch_state")
+    if config_switch_state_raw is not None and not isinstance(
+        config_switch_state_raw, Mapping
+    ):
+        raise _journal_invalid(f"{context}: config_switch_state must be a table")
+    manual_reason = document.get("manual_intervention_reason")
+    if manual_reason is not None and not isinstance(manual_reason, str):
+        raise _journal_invalid(
+            f"{context}: manual_intervention_reason must be a string"
+        )
 
     # Parse cleanup warnings
     cleanup_warnings: list[str] = []
@@ -1581,6 +2016,10 @@ def _parse_schema3_journal(
             raise _journal_invalid(f"{context}: item {key} must be a table")
 
         item_index = int(item_raw["item_index"])
+        if item_index != int(key):
+            raise _journal_invalid(
+                f"{context}: item key {key!r} does not match item_index {item_index}"
+            )
         item_state = _journal_string(
             item_raw, "state", context=f"{context} item {item_index}"
         )
@@ -1589,16 +2028,35 @@ def _parse_schema3_journal(
             raise _journal_invalid(
                 f"{context} item {item_index}: invalid state {item_state!r}"
             )
+        expected_before_state = item_raw.get("expected_before_state")
+        if expected_before_state is not None and expected_before_state not in {
+            "absent",
+            "empty-unbound",
+            "owned",
+        }:
+            raise _journal_invalid(
+                f"{context} item {item_index}: invalid expected_before_state"
+            )
+        item_component = _journal_string(
+            item_raw, "component", context=f"{context} item {item_index}"
+        )
+        item_strategy = _journal_string(
+            item_raw, "strategy", context=f"{context} item {item_index}"
+        )
+        item_policy = _journal_string(
+            item_raw, "destination_policy", context=f"{context} item {item_index}"
+        )
+        if item_component not in {"config", "mount"}:
+            raise _journal_invalid(f"{context} item {item_index}: invalid component")
+        if item_strategy not in _JOURNAL_STRATEGIES:
+            raise _journal_invalid(f"{context} item {item_index}: invalid strategy")
+        if item_policy not in _DESTINATION_POLICIES:
+            raise _journal_invalid(f"{context} item {item_index}: invalid policy")
 
         items.append(
             Schema3ItemJournalState(
                 item_index=item_index,
-                component=cast(
-                    Literal["config", "mount"],
-                    _journal_string(
-                        item_raw, "component", context=f"{context} item {item_index}"
-                    ),
-                ),
+                component=cast(Literal["config", "mount"], item_component),
                 tool_name=_journal_string(
                     item_raw, "tool_name", context=f"{context} item {item_index}"
                 ),
@@ -1615,15 +2073,20 @@ def _parse_schema3_journal(
                         item_raw, "destination", context=f"{context} item {item_index}"
                     )
                 ),
-                strategy=_journal_string(
-                    item_raw, "strategy", context=f"{context} item {item_index}"
-                ),  # type: ignore[arg-type]
-                destination_policy=_journal_string(
-                    item_raw,
-                    "destination_policy",
-                    context=f"{context} item {item_index}",
-                ),  # type: ignore[arg-type]
+                strategy=cast(MigrationStrategy, item_strategy),
+                destination_policy=cast(DestinationPolicy, item_policy),
                 state=item_state,  # type: ignore[arg-type]
+                source_binding=_binding_from_toml(
+                    item_raw.get("source_binding"),
+                    context=f"{context} item {item_index} source",
+                ),
+                destination_binding=_binding_from_toml(
+                    item_raw.get("destination_binding"),
+                    context=f"{context} item {item_index} destination",
+                ),
+                expected_before_state=cast(
+                    DestinationState | None, expected_before_state
+                ),
                 source_fingerprint=_fingerprint_from_toml(
                     item_raw.get("source_fingerprint")
                 ),
@@ -1659,6 +2122,16 @@ def _parse_schema3_journal(
                 raise _journal_invalid(
                     f"{context}: config_switch {key} must be a table"
                 )
+            previous_content = sw_raw.get("previous_content")
+            target_content = sw_raw.get("target_content")
+            if previous_content is not None and not isinstance(previous_content, str):
+                raise _journal_invalid(
+                    f"{context}: config_switch {key} previous_content must be text"
+                )
+            if target_content is not None and not isinstance(target_content, str):
+                raise _journal_invalid(
+                    f"{context}: config_switch {key} target_content must be text"
+                )
             config_switches.append(
                 Schema3ConfigSwitchState(
                     kind=_journal_string(
@@ -1684,6 +2157,11 @@ def _parse_schema3_journal(
                     if "backup_path" in sw_raw
                     else None,
                     error=sw_raw.get("error"),
+                    intent_written=bool(sw_raw.get("intent_written", False)),
+                    applied=bool(sw_raw.get("applied", False)),
+                    verified=bool(sw_raw.get("verified", False)),
+                    previous_content=previous_content,
+                    target_content=target_content,
                 )
             )
 
@@ -1701,6 +2179,20 @@ def _parse_schema3_journal(
         requires_activated_validation=requires_activated,
         requires_finalization=requires_final,
         cleanup_warnings=tuple(cleanup_warnings),
+        plan_digest=plan_digest,
+        lock_identity=dict(lock_identity_raw),
+        created_at=created_at,
+        updated_at=updated_at,
+        config_switch_state=(
+            dict(config_switch_state_raw)
+            if isinstance(config_switch_state_raw, Mapping)
+            else None
+        ),
+        manual_intervention_reason=manual_reason,
+        quiescence_completed=quiescence_completed,
+        staged_validated=staged_validated,
+        activated_validated=activated_validated,
+        finalized=finalized,
     )
 
 
@@ -1722,220 +2214,396 @@ def _verify(source: Path, destination: Path, mode: VerifyMode) -> None:
         )
 
 
-def execute_storage_migration(  # noqa: C901
-    plan: StorageMigrationPlan,
-    *,
-    mode: MigrationMode = "copy",
-    verify: VerifyMode = "sha256",
-    quiescence_check: Callable[[], None] | None = None,
-    project_root: Path | None = None,
-) -> StorageMigrationResult:
-    """Execute a previously validated plan with journaled, verified switching."""
-    if mode not in {"copy", "move"}:
+def _migration_fingerprint(path: Path, kind: DestinationKind) -> StorageFingerprint:
+    if kind == "file":
+        return fingerprint_storage_file(path)
+    return fingerprint_storage_directory(path)
+
+
+def _fingerprint_file_bytes(contents: str) -> StorageFingerprint:
+    raw = contents.encode("utf-8")
+    content_digest = hashlib.sha256(raw).hexdigest()
+    digest = hashlib.sha256(f"F\\0{len(raw)}\\0{content_digest}".encode()).hexdigest()
+    return StorageFingerprint("sha256-file-v1", digest, 1, len(raw))
+
+
+def _render_config_changes(
+    changes: LedgerLocalOverrides | LedgerProjectManifest,
+) -> tuple[Path, str]:
+    if isinstance(changes, LedgerLocalOverrides):
+        return Path(".ledger/ledger.local.toml"), render_ledger_local_config(changes)
+    return Path(".ledger/ledger.toml"), render_ledger_manifest(changes)
+
+
+def _call_hook(name: str, callback: Callable[..., Any], *args: object) -> None:
+    try:
+        callback(*args)
+    except Exception as exc:
         raise StorageMigrationError(
-            "unsupported migration mode",
-            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
-        )
-    if mode == "move":
-        raise StorageMigrationError(
-            "mode='move' is disabled in Ledgercore 0.5.1 because source cleanup "
-            "is not safely recoverable; use mode='copy'",
-            code="STORAGE_MIGRATION_MOVE_DISABLED",
-        )
-    if verify not in {"sha256", "size"}:
-        raise StorageMigrationError(
-            "unsupported verification mode",
-            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
-        )
-    durable = any(
-        item.component == "mount" and item.strategy == "copy" for item in plan.items
+            f"migration hook {name} failed: {exc}",
+            code="STORAGE_MIGRATION_HOOK_FAILED",
+        ) from exc
+
+
+def _item_kind(item: StorageMigrationItem) -> DestinationKind:
+    return item.destination_kind or (
+        "file" if item.component == "config" else "directory"
     )
-    if durable and quiescence_check is None:
-        raise StorageMigrationError(
-            "durable migration requires a downstream quiescence_check"
+
+
+def _validate_execution_preflight(
+    plan: StorageMigrationPlan,
+    validation: StorageMigrationPlanValidation,
+) -> None:
+    for index, item in enumerate(plan.items):
+        if item.strategy == "noop":
+            continue
+        kind = _item_kind(item)
+        if item.strategy == "copy":
+            if not item.source.exists() or item.source.is_symlink():
+                raise StorageMigrationError(
+                    f"item {index}: source precondition changed at {item.source}",
+                    code="STORAGE_MIGRATION_SOURCE_CHANGED",
+                )
+            actual_source = _migration_fingerprint(item.source, kind)
+            expected_source = item.expected_source_fingerprint
+            if expected_source is not None and actual_source != expected_source:
+                raise StorageMigrationError(
+                    f"item {index}: source fingerprint changed at {item.source}",
+                    code="STORAGE_MIGRATION_SOURCE_CHANGED",
+                )
+        inspection = inspect_storage_migration_destination(
+            path=item.destination,
+            kind=kind,
+            expected_binding=item.destination_binding,
         )
-    if quiescence_check is not None and not callable(quiescence_check):
-        raise StorageMigrationError(
-            "quiescence_check must be callable",
-            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
-        )
-    root = (project_root or Path.cwd()).resolve(strict=False)
-    # Validate plan before any journal write
-    validation = validate_storage_migration_plan(plan, project_root=root)
+        if inspection.state in {"foreign", "invalid"}:
+            raise StorageMigrationError(
+                f"item {index}: destination {item.destination} is {inspection.state}",
+                code=(
+                    "STORAGE_MIGRATION_DESTINATION_FOREIGN"
+                    if inspection.state == "foreign"
+                    else "STORAGE_MIGRATION_UNSAFE_PATH"
+                ),
+            )
+        if item.destination_policy == "create-only" and inspection.state == "owned":
+            raise StorageMigrationError(
+                f"item {index}: create-only destination already exists at "
+                f"{item.destination}",
+                code="STORAGE_MIGRATION_DESTINATION_UNEXPECTED",
+            )
+        if item.destination_policy == "replace-owned":
+            if inspection.state != "owned" or item.expected_before.fingerprint is None:
+                raise StorageMigrationError(
+                    f"item {index}: owned destination precondition failed at "
+                    f"{item.destination}",
+                    code="STORAGE_MIGRATION_DESTINATION_UNEXPECTED",
+                )
+            if inspection.fingerprint != item.expected_before.fingerprint:
+                raise StorageMigrationError(
+                    f"item {index}: destination fingerprint changed at "
+                    f"{item.destination}",
+                    code="STORAGE_MIGRATION_DESTINATION_CHANGED",
+                )
+        if item.destination_policy == "noop-if-exact":
+            if inspection.fingerprint != item.expected_target_fingerprint:
+                raise StorageMigrationError(
+                    f"item {index}: destination is not the expected exact target",
+                    code="STORAGE_MIGRATION_DESTINATION_UNEXPECTED",
+                )
+        paths = _prepare_item_paths(item.destination, plan.migration_id, index)
+        _validate_same_filesystem(item.destination, paths.stage, paths.backup, index)
+        for generated in (paths.stage, paths.backup):
+            if generated.exists():
+                raise StorageMigrationError(
+                    f"item {index}: migration-owned path collision at {generated}",
+                    code="STORAGE_MIGRATION_PATH_COLLISION",
+                )
     if not validation.valid:
         raise StorageMigrationError(
             f"migration plan is invalid: {'; '.join(validation.errors)}",
             code="STORAGE_MIGRATION_PLAN_INVALID",
         )
-    journal = _journal_path(plan, root)
-    completed = 0
-    try:
-        _write_journal(
-            plan,
-            journal,
-            phase="planned",
-            mode=mode,
-            verify=verify,
-            project_root=root,
-            items_completed=0,
-            source_removed=False,
-        )
-        _write_journal(
-            plan,
-            journal,
-            phase="copying",
-            mode=mode,
-            verify=verify,
-            project_root=root,
-            items_completed=0,
-            source_removed=False,
-        )
-        for item in plan.items:
-            if item.strategy == "noop":
-                completed += 1
-                _write_journal(
-                    plan,
-                    journal,
-                    phase="copying",
-                    mode=mode,
-                    verify=verify,
-                    project_root=root,
-                    items_completed=completed,
-                    source_removed=False,
-                )
-                continue
-            if quiescence_check is not None:
-                quiescence_check()
-            if item.strategy == "rebuild":
-                destination = item.destination
-                _validate_destination(destination, item.destination_binding)
-                if destination.exists() and any(destination.iterdir()):
-                    actual = read_storage_binding(destination / ".ledger-project.toml")
-                    if storage_bindings_match(actual, item.destination_binding):
-                        completed += 1
-                        _write_journal(
-                            plan,
-                            journal,
-                            phase="copying",
-                            mode=mode,
-                            verify=verify,
-                            project_root=root,
-                            items_completed=completed,
-                            source_removed=False,
-                        )
-                        continue
-                destination.mkdir(parents=True, exist_ok=True)
-                write_storage_binding(destination, item.destination_binding)
-            elif item.component == "config":
-                if item.destination.exists():
-                    raise StorageMigrationError(
-                        "config migration destination already exists: "
-                        f"{item.destination}"
-                    )
-                temporary = item.destination.with_name(
-                    f".{item.destination.name}.migrating-{plan.migration_id}"
-                )
-                _copy_file(item.source, temporary)
-                temporary.replace(item.destination)
-                write_storage_binding(item.destination.parent, item.destination_binding)
-            else:
-                _validate_destination(item.destination, item.destination_binding)
-                temporary, staging_root = _staging_path(
-                    item.source, item.destination, plan.migration_id
-                )
-                if staging_root is not None:
-                    if staging_root.exists():
-                        shutil.rmtree(staging_root)
-                    staging_root.mkdir(parents=True, exist_ok=False)
-                elif temporary.exists():
-                    shutil.rmtree(temporary)
-                _copy_tree(item.source, temporary)
-                write_storage_binding(temporary, item.destination_binding)
-                _verify(item.source, temporary, verify)
-                if item.destination.exists():
-                    if any(item.destination.iterdir()):
-                        raise StorageMigrationError(
-                            "migration destination became non-empty: "
-                            f"{item.destination}"
-                        )
-                    item.destination.rmdir()
-                temporary.replace(item.destination)
-                if staging_root is not None:
-                    staging_root.rmdir()
-            completed += 1
-            _write_journal(
-                plan,
-                journal,
-                phase="copying",
-                mode=mode,
-                verify=verify,
-                project_root=root,
-                items_completed=completed,
-                source_removed=False,
-            )
-        _write_journal(
-            plan,
-            journal,
-            phase="verified",
-            mode=mode,
-            verify=verify,
-            project_root=root,
-            items_completed=completed,
-            source_removed=False,
-        )
-        if quiescence_check is not None:
-            quiescence_check()
-        if isinstance(plan.config_changes, LedgerLocalOverrides):
-            write_ledger_local_config(
-                root / ".ledger" / "ledger.local.toml",
-                plan.config_changes,
-                delete_if_empty=True,
-            )
-        else:
-            write_ledger_manifest(root / ".ledger" / "ledger.toml", plan.config_changes)
-        _write_journal(
-            plan,
-            journal,
-            phase="config-switched",
-            mode=mode,
-            verify=verify,
-            project_root=root,
-            items_completed=completed,
-            source_removed=False,
-        )
-        _write_journal(
-            plan,
-            journal,
-            phase="complete",
-            mode=mode,
-            verify=verify,
-            project_root=root,
-            items_completed=completed,
-            source_removed=False,
-        )
-        return StorageMigrationResult(
-            plan.migration_id, "complete", completed, False, journal
-        )
-    except Exception as exc:
-        try:
-            _write_journal(
-                plan,
-                journal,
-                phase="failed",
-                mode=mode,
-                verify=verify,
-                project_root=root,
-                items_completed=completed,
-                source_removed=False,
-                error=str(exc),
-            )
-        except Exception:
-            pass
-        if isinstance(exc, StorageMigrationError):
-            raise
+
+
+def _result_from_schema3(
+    journal: Schema3MigrationJournal,
+    path: Path,
+    *,
+    error_code: str | None = None,
+    recommendation: str | None = None,
+) -> StorageMigrationResult:
+    outcomes = tuple(
+        {"index": item.item_index, "state": item.state, "error": item.error}
+        for item in journal.items
+    )
+    fingerprints = tuple(
+        item.activated_fingerprint
+        for item in journal.items
+        if item.activated_fingerprint is not None
+    )
+    return StorageMigrationResult(
+        journal.migration_id,
+        journal.phase,
+        sum(item.state == "complete" for item in journal.items),
+        False,
+        path,
+        outcomes,
+        fingerprints,
+        any(s.state == "activated" for s in journal.config_switches),
+        journal.phase == "complete" and not journal.cleanup_warnings,
+        error_code,
+        recommendation,
+    )
+
+
+def execute_storage_migration(  # noqa: C901
+    plan: StorageMigrationPlan,
+    *,
+    mode: MigrationMode = "copy",
+    verify: VerifyMode = "sha256",
+    hooks: StorageMigrationHooks | None = None,
+    quiescence_check: Callable[[], None] | None = None,
+    project_root: Path | None = None,
+) -> StorageMigrationResult:
+    """Execute a copy-only migration as a durable schema-3 transaction."""
+    if mode == "move":
         raise StorageMigrationError(
-            f"storage migration {plan.migration_id} failed: {exc}"
-        ) from exc
+            "mode='move' is unsupported; Ledgercore migrations are copy-only",
+            code="STORAGE_MIGRATION_MOVE_DISABLED",
+        )
+    if mode != "copy" or verify not in {"sha256", "size"}:
+        raise StorageMigrationError(
+            "unsupported migration execution option",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+        )
+    active_hooks = hooks or StorageMigrationHooks()
+    if quiescence_check is not None and active_hooks.quiescence_check is not None:
+        if quiescence_check is not active_hooks.quiescence_check:
+            raise StorageMigrationError(
+                "quiescence_check conflicts with hooks.quiescence_check",
+                code="STORAGE_MIGRATION_INVALID_ARGUMENT",
+            )
+    if quiescence_check is not None:
+        active_hooks = replace(active_hooks, quiescence_check=quiescence_check)
+    active_hooks.validate_requirements()
+    root = (project_root or plan.project_root or Path.cwd()).resolve(strict=False)
+    validation = validate_storage_migration_plan(plan, project_root=root)
+    _validate_execution_preflight(plan, validation)
+    journal_path = _journal_path(plan, root)
+    lock = MigrationLock(root, plan.migration_id)
+    journal = _schema3_journal_from_plan(
+        plan, root=root, mode="copy", verify=verify, hooks=active_hooks
+    )
+    with lock:
+        try:
+            _persist_schema3(journal, journal_path)
+            if active_hooks.quiescence_check is not None:
+                _call_hook("quiescence_check", active_hooks.quiescence_check)
+                journal = replace(journal, quiescence_completed=True)
+                _persist_schema3(journal, journal_path)
+            journal = _transition_phase(journal, "staging")
+            _persist_schema3(journal, journal_path)
+            for index, item in enumerate(plan.items):
+                if item.strategy == "noop":
+                    journal = _transition_item(journal, index, "complete")
+                    _persist_schema3(journal, journal_path)
+                    continue
+                paths = _prepare_item_paths(item.destination, plan.migration_id, index)
+                journal = _transition_item(journal, index, "staging")
+                _persist_schema3(journal, journal_path)
+                kind = _item_kind(item)
+                if kind == "file":
+                    _copy_file(item.source, paths.stage)
+                else:
+                    _copy_tree(item.source, paths.stage)
+                    write_storage_binding(paths.stage, item.destination_binding)
+                staged_fp = _migration_fingerprint(paths.stage, kind)
+                expected_source = item.expected_source_fingerprint
+                if expected_source is not None and staged_fp != expected_source:
+                    raise StorageMigrationError(
+                        f"item {index}: staged fingerprint does not match source "
+                        f"at {item.source}",
+                        code="STORAGE_MIGRATION_VERIFICATION_FAILED",
+                    )
+                journal = _transition_item(
+                    journal, index, "staged", staged_fingerprint=staged_fp
+                )
+                _persist_schema3(journal, journal_path)
+                if active_hooks.validate_staged is not None:
+                    _call_hook("validate_staged", active_hooks.validate_staged, index)
+                    journal = replace(
+                        journal,
+                        staged_validated=tuple((*journal.staged_validated, index)),
+                    )
+                    _persist_schema3(journal, journal_path)
+                journal = _transition_item(journal, index, "stage-verified")
+                _persist_schema3(journal, journal_path)
+            journal = _transition_phase(journal, "staged")
+            _persist_schema3(journal, journal_path)
+            journal = _transition_phase(journal, "activating")
+            _persist_schema3(journal, journal_path)
+            for index, item in enumerate(plan.items):
+                if item.strategy == "noop":
+                    continue
+                paths = _prepare_item_paths(item.destination, plan.migration_id, index)
+                kind = _item_kind(item)
+                inspection = inspect_storage_migration_destination(
+                    path=item.destination,
+                    kind=kind,
+                    expected_binding=item.destination_binding,
+                )
+                if inspection.state == "owned":
+                    journal = _transition_item(journal, index, "backup-intent")
+                    _persist_schema3(journal, journal_path)
+                    _durable_rename(item.destination, paths.backup)
+                    journal = _transition_item(journal, index, "backup-created")
+                    _persist_schema3(journal, journal_path)
+                elif inspection.state not in {"absent", "empty-unbound"}:
+                    raise StorageMigrationError(
+                        f"item {index}: destination changed before activation",
+                        code="STORAGE_MIGRATION_DESTINATION_CHANGED",
+                    )
+                if inspection.state == "empty-unbound":
+                    raise StorageMigrationError(
+                        f"item {index}: empty-unbound destination cannot be "
+                        "atomically activated",
+                        code="STORAGE_MIGRATION_DESTINATION_UNEXPECTED",
+                    )
+                journal = _transition_item(journal, index, "activation-intent")
+                _persist_schema3(journal, journal_path)
+                _durable_rename(paths.stage, item.destination)
+                activated_fp = _migration_fingerprint(item.destination, kind)
+                expected_target = (
+                    item.expected_target_fingerprint
+                    or journal.items[index].staged_fingerprint
+                )
+                if expected_target is not None and activated_fp != expected_target:
+                    raise StorageMigrationError(
+                        f"item {index}: activated fingerprint verification failed "
+                        f"at {item.destination}",
+                        code="STORAGE_MIGRATION_VERIFICATION_FAILED",
+                    )
+                journal = _transition_item(
+                    journal, index, "activated", activated_fingerprint=activated_fp
+                )
+                _persist_schema3(journal, journal_path)
+                if active_hooks.validate_activated is not None:
+                    _call_hook(
+                        "validate_activated", active_hooks.validate_activated, index
+                    )
+                    journal = replace(
+                        journal,
+                        activated_validated=tuple(
+                            (*journal.activated_validated, index)
+                        ),
+                    )
+                    _persist_schema3(journal, journal_path)
+                journal = _transition_item(journal, index, "post-verified")
+                _persist_schema3(journal, journal_path)
+            journal = _transition_phase(journal, "items-activated")
+            _persist_schema3(journal, journal_path)
+            config_relative, target_content = _render_config_changes(
+                plan.config_changes
+            )
+            config_path = root / config_relative
+            previous_content = (
+                config_path.read_text(encoding="utf-8")
+                if config_path.is_file()
+                else None
+            )
+            config_state = Schema3ConfigSwitchState(
+                kind=(
+                    "local-overrides"
+                    if isinstance(plan.config_changes, LedgerLocalOverrides)
+                    else "manifest"
+                ),
+                destination=config_path,
+                expected_before_fingerprint=(
+                    fingerprint_storage_file(config_path)
+                    if config_path.is_file()
+                    else None
+                ),
+                target_fingerprint=_fingerprint_file_bytes(target_content),
+                backup_path=config_path.with_name(
+                    f".{config_path.name}.backup-{plan.migration_id}"
+                ),
+                previous_content=previous_content,
+                target_content=target_content,
+            )
+            journal = _transition_phase(journal, "config-switching")
+            journal = replace(journal, config_switches=(config_state,))
+            _persist_schema3(journal, journal_path)
+            config_state = replace(config_state, intent_written=True, state="staged")
+            journal = replace(journal, config_switches=(config_state,))
+            _persist_schema3(journal, journal_path)
+            atomic_write_text(config_path, target_content)
+            config_state = replace(config_state, applied=True, state="activated")
+            journal = replace(journal, config_switches=(config_state,))
+            _persist_schema3(journal, journal_path)
+            if fingerprint_storage_file(config_path) != config_state.target_fingerprint:
+                raise StorageMigrationError(
+                    f"configuration verification failed at {config_path}",
+                    code="STORAGE_MIGRATION_CONFIG_SWITCH_FAILED",
+                )
+            config_state = replace(config_state, verified=True)
+            journal = replace(journal, config_switches=(config_state,))
+            journal = _transition_phase(journal, "config-switched")
+            _persist_schema3(journal, journal_path)
+            journal = _transition_phase(journal, "post-verifying")
+            _persist_schema3(journal, journal_path)
+            if active_hooks.finalize is not None:
+                _call_hook("finalize", active_hooks.finalize)
+                journal = replace(journal, finalized=True)
+                _persist_schema3(journal, journal_path)
+            journal = _transition_phase(journal, "committed")
+            _persist_schema3(journal, journal_path)
+            journal = _transition_phase(journal, "cleaning-up")
+            _persist_schema3(journal, journal_path)
+            cleanup_warnings: list[str] = []
+            for index, item in enumerate(plan.items):
+                paths = _prepare_item_paths(item.destination, plan.migration_id, index)
+                if paths.stage.exists():
+                    paths.stage.unlink() if paths.stage.is_file() else shutil.rmtree(
+                        paths.stage
+                    )
+                if paths.backup.exists():
+                    paths.backup.unlink() if paths.backup.is_file() else shutil.rmtree(
+                        paths.backup
+                    )
+                if item.strategy != "noop":
+                    journal = _transition_item(journal, index, "cleanup-pending")
+                    journal = _transition_item(journal, index, "complete")
+            journal = replace(journal, cleanup_warnings=tuple(cleanup_warnings))
+            journal = _transition_phase(journal, "complete")
+            _persist_schema3(journal, journal_path)
+            return _result_from_schema3(journal, journal_path)
+        except Exception as exc:
+            error_code = (
+                exc.code
+                if isinstance(exc, StorageMigrationError)
+                else "STORAGE_MIGRATION_RECOVERY_FAILED"
+            )
+            message = str(exc)[:500]
+            failed_items = tuple(
+                replace(item, error=message)
+                if item.state not in {"complete", "rolled-back"} and item.error is None
+                else item
+                for item in journal.items
+            )
+            journal = replace(
+                journal, phase="failed", error=message, items=failed_items
+            )
+            try:
+                _persist_schema3(journal, journal_path)
+            except Exception:
+                pass
+            if isinstance(exc, StorageMigrationError):
+                raise
+            raise StorageMigrationError(
+                f"storage migration {plan.migration_id} failed: {exc}",
+                code=error_code,
+            ) from exc
 
 
 def _inspect_journal_v1(
@@ -2092,7 +2760,9 @@ def _inspect_journal_v2(
     )
 
 
-def inspect_storage_migration(journal_path: Path) -> StorageMigrationJournal:
+def inspect_storage_migration(
+    journal_path: Path,
+) -> StorageMigrationJournal | Schema3MigrationJournal:
     """Read a migration journal for operator or recovery tooling."""
     if journal_path.is_symlink() or not journal_path.is_file():
         raise StorageMigrationError(
@@ -2106,6 +2776,7 @@ def inspect_storage_migration(journal_path: Path) -> StorageMigrationJournal:
             f"unable to read migration journal {journal_path}: {exc}",
             code="STORAGE_MIGRATION_JOURNAL_INVALID",
         ) from exc
+
     if not isinstance(document, Mapping):
         raise StorageMigrationError(
             f"migration journal {journal_path} is not a TOML table",
@@ -2122,6 +2793,18 @@ def inspect_storage_migration(journal_path: Path) -> StorageMigrationJournal:
             return _inspect_journal_v1(document, journal_path)
         elif schema_raw == 2:
             return _inspect_journal_v2(document, journal_path)
+        elif schema_raw == 3:
+            journal = _parse_schema3_journal(document, journal_path)
+            if journal.plan_digest is not None:
+                # A digest is a commitment, not a suggestion; the plan is not
+                # available during inspection, so retain it for recovery checks.
+                if len(journal.plan_digest) != 64 or any(
+                    char not in "0123456789abcdef" for char in journal.plan_digest
+                ):
+                    raise _journal_invalid(
+                        f"schema-3 journal {journal_path}: invalid plan_digest"
+                    )
+            return journal
         else:
             raise StorageMigrationError(
                 f"migration journal {journal_path} has unsupported schema {schema_raw}",
@@ -2136,27 +2819,570 @@ def inspect_storage_migration(journal_path: Path) -> StorageMigrationJournal:
         ) from exc
 
 
+def assess_storage_migration(
+    journal_path: Path,
+    *,
+    project_root: Path | None = None,
+) -> RecoveryAssessment:
+    """Return the non-mutating schema-3 recovery assessment for a journal."""
+    inspected = inspect_storage_migration(journal_path)
+    if not isinstance(inspected, Schema3MigrationJournal):
+        recommendation: Literal[
+            "resume", "rollback", "complete", "manual-intervention"
+        ] = "complete" if inspected.phase == "complete" else "manual-intervention"
+        return RecoveryAssessment(
+            migration_id=inspected.migration_id,
+            journal_path=journal_path,
+            phase=inspected.phase,
+            item_states=(),
+            owned_paths=(),
+            blockers=()
+            if recommendation == "complete"
+            else ("legacy journal is not automatically recoverable",),
+            recommendation=recommendation,
+            resumable=False,
+            rollbackable=False,
+            complete=inspected.phase == "complete",
+        )
+    return _schema3_assessment(inspected, journal_path, project_root=project_root)
+
+
+def _path_is_owned_directory(path: Path, binding: StorageBinding | None) -> bool:
+    if binding is None or not path.is_dir() or path.is_symlink():
+        return False
+    marker = path / ".ledger-project.toml"
+    try:
+        return marker.is_file() and storage_bindings_match(
+            read_storage_binding(marker), binding
+        )
+    except StorageBindingError:
+        return False
+
+
+def _schema3_assessment(  # noqa: C901
+    journal: Schema3MigrationJournal,
+    journal_path: Path,
+    *,
+    project_root: Path | None = None,
+) -> RecoveryAssessment:
+    blockers: list[str] = []
+    owned: list[Path] = []
+    resumable = journal.phase != "complete"
+    rollbackable = journal.phase not in {"complete", "rolled-back"}
+    states: list[MigrationItemState] = []
+    for item in journal.items:
+        states.append(item.state)
+        kind: DestinationKind = "file" if item.component == "config" else "directory"
+        destination_inspection = None
+        if item.destination_binding is not None:
+            destination_inspection = inspect_storage_migration_destination(
+                path=item.destination,
+                kind=kind,
+                expected_binding=item.destination_binding,
+            )
+            if destination_inspection.state == "foreign":
+                blockers.append(f"foreign destination {item.destination}")
+                resumable = False
+                rollbackable = False
+            elif destination_inspection.state == "owned":
+                owned.append(item.destination)
+        if item.stage_path is not None and item.stage_path.exists():
+            if kind == "directory" and not _path_is_owned_directory(
+                item.stage_path, item.destination_binding
+            ):
+                blockers.append(
+                    f"stage ownership cannot be proven at {item.stage_path}"
+                )
+                resumable = False
+                rollbackable = False
+            elif kind == "file" and (
+                item.stage_path.is_symlink() or not item.stage_path.is_file()
+            ):
+                blockers.append(f"unsafe stage path {item.stage_path}")
+                resumable = False
+                rollbackable = False
+            else:
+                owned.append(item.stage_path)
+                try:
+                    staged = _migration_fingerprint(item.stage_path, kind)
+                    if (
+                        item.staged_fingerprint is not None
+                        and staged != item.staged_fingerprint
+                    ):
+                        blockers.append(
+                            f"stage fingerprint mismatch at {item.stage_path}"
+                        )
+                        resumable = False
+                        rollbackable = False
+                except StorageMigrationError as exc:
+                    blockers.append(str(exc))
+                    resumable = False
+                    rollbackable = False
+        elif item.state in {"staged", "stage-verified", "activation-intent"}:
+            blockers.append(f"journal-owned stage is missing at {item.stage_path}")
+            resumable = False
+        if item.backup_path is not None and item.backup_path.exists():
+            if kind == "directory" and not _path_is_owned_directory(
+                item.backup_path, item.destination_binding
+            ):
+                blockers.append(
+                    f"backup ownership cannot be proven at {item.backup_path}"
+                )
+                resumable = False
+                rollbackable = False
+            elif item.backup_path.is_symlink():
+                blockers.append(f"unsafe backup path {item.backup_path}")
+                resumable = False
+                rollbackable = False
+            else:
+                owned.append(item.backup_path)
+        if item.state == "activation-intent" and destination_inspection is not None:
+            if (
+                destination_inspection.state == "owned"
+                and item.activated_fingerprint is None
+            ):
+                try:
+                    if (
+                        item.expected_target_fingerprint is not None
+                        and destination_inspection.fingerprint
+                        != item.expected_target_fingerprint
+                    ):
+                        blockers.append(
+                            f"activation result mismatch at {item.destination}"
+                        )
+                        resumable = False
+                except Exception:
+                    resumable = False
+        if item.source_fingerprint is not None and item.source.exists():
+            try:
+                if _migration_fingerprint(item.source, kind) != item.source_fingerprint:
+                    blockers.append(f"source changed at {item.source}")
+                    resumable = False
+            except StorageMigrationError as exc:
+                blockers.append(str(exc))
+                resumable = False
+    if journal.error and journal.phase == "failed" and not blockers:
+        # A bounded recorded error is not by itself ambiguity; the filesystem
+        # assessment above is authoritative for recovery selection.
+        pass
+    if journal.phase == "complete":
+        recommendation: Literal[
+            "resume", "rollback", "complete", "manual-intervention"
+        ] = "complete"
+    elif blockers:
+        recommendation = "manual-intervention"
+    elif resumable:
+        recommendation = "resume"
+    elif rollbackable:
+        recommendation = "rollback"
+    else:
+        recommendation = "manual-intervention"
+    return RecoveryAssessment(
+        migration_id=journal.migration_id,
+        journal_path=journal_path,
+        phase=journal.phase,
+        item_states=tuple(states),
+        owned_paths=tuple(dict.fromkeys(owned)),
+        blockers=tuple(blockers),
+        recommendation=recommendation,
+        resumable=resumable,
+        rollbackable=rollbackable,
+        complete=journal.phase == "complete",
+    )
+
+
+def _recover_schema3_rollback(
+    journal: Schema3MigrationJournal,
+    journal_path: Path,
+    *,
+    root: Path,
+) -> StorageMigrationResult:
+    assessment = _schema3_assessment(journal, journal_path, project_root=root)
+    if assessment.blockers:
+        raise StorageMigrationError(
+            f"rollback requires manual intervention: {'; '.join(assessment.blockers)}",
+            code="STORAGE_MIGRATION_ROLLBACK_CONFLICT",
+        )
+    journal = replace(journal, phase="rolling-back")
+    _persist_schema3(journal, journal_path)
+    try:
+        for index in reversed(range(len(journal.items))):
+            item = journal.items[index]
+            if item.destination_binding is None:
+                continue
+            if item.state == "complete":
+                journal = replace(
+                    journal,
+                    items=tuple(
+                        replace(candidate, state="rollback-intent")
+                        if candidate.item_index == index
+                        else candidate
+                        for candidate in journal.items
+                    ),
+                )
+                _persist_schema3(journal, journal_path)
+            elif item.state != "rolled-back":
+                journal = _transition_item(journal, index, "rollback-intent")
+                _persist_schema3(journal, journal_path)
+            kind: DestinationKind = (
+                "file" if item.component == "config" else "directory"
+            )
+            if item.destination.exists() and item.destination_binding is not None:
+                inspection = inspect_storage_migration_destination(
+                    path=item.destination,
+                    kind=kind,
+                    expected_binding=item.destination_binding,
+                )
+                if inspection.state == "foreign":
+                    raise StorageMigrationError(
+                        f"rollback would overwrite foreign destination "
+                        f"{item.destination}",
+                        code="STORAGE_MIGRATION_ROLLBACK_CONFLICT",
+                    )
+                if inspection.state == "owned":
+                    if kind == "file":
+                        item.destination.unlink()
+                    else:
+                        shutil.rmtree(item.destination)
+            if item.backup_path is not None and item.backup_path.exists():
+                _durable_rename(item.backup_path, item.destination)
+            if item.stage_path is not None and item.stage_path.exists():
+                if kind == "file":
+                    item.stage_path.unlink()
+                else:
+                    shutil.rmtree(item.stage_path)
+            journal = _transition_item(journal, index, "rolled-back")
+            journal = _transition_item(journal, index, "cleanup-pending")
+            journal = _transition_item(journal, index, "complete")
+            _persist_schema3(journal, journal_path)
+        for switch in journal.config_switches:
+            if not switch.applied:
+                continue
+            current = (
+                fingerprint_storage_file(switch.destination)
+                if switch.destination.is_file()
+                else None
+            )
+            if current != switch.target_fingerprint:
+                raise StorageMigrationError(
+                    f"configuration changed outside migration at {switch.destination}",
+                    code="STORAGE_MIGRATION_ROLLBACK_CONFLICT",
+                )
+            if switch.previous_content is None:
+                switch.destination.unlink(missing_ok=True)
+            else:
+                atomic_write_text(switch.destination, switch.previous_content)
+        journal = replace(journal, phase="rolled-back")
+        _persist_schema3(journal, journal_path)
+        return _result_from_schema3(journal, journal_path, recommendation="rollback")
+    except Exception as exc:
+        journal = replace(
+            journal,
+            phase="failed",
+            error=str(exc)[:500],
+            manual_intervention_reason="rollback conflict or ownership proof failed",
+        )
+        try:
+            _persist_schema3(journal, journal_path)
+        except Exception:
+            pass
+        if isinstance(exc, StorageMigrationError):
+            raise
+        raise StorageMigrationError(
+            f"rollback failed: {exc}", code="STORAGE_MIGRATION_ROLLBACK_CONFLICT"
+        ) from exc
+
+
+def _recover_schema3_resume(  # noqa: C901
+    journal: Schema3MigrationJournal,
+    journal_path: Path,
+    *,
+    root: Path,
+    hooks: StorageMigrationHooks,
+) -> StorageMigrationResult:
+    assessment = _schema3_assessment(journal, journal_path, project_root=root)
+    if assessment.blockers:
+        raise StorageMigrationError(
+            f"resume requires manual intervention: {'; '.join(assessment.blockers)}",
+            code="STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED",
+        )
+    with MigrationLock(root, journal.migration_id):
+        try:
+            if hooks.quiescence_check is not None and not journal.quiescence_completed:
+                _call_hook("quiescence_check", hooks.quiescence_check)
+                journal = replace(journal, quiescence_completed=True)
+                _persist_schema3(journal, journal_path)
+            for index, item in enumerate(journal.items):
+                if item.state == "complete":
+                    continue
+                kind: DestinationKind = (
+                    "file" if item.component == "config" else "directory"
+                )
+                if item.state in {"activated", "post-verified", "cleanup-pending"}:
+                    if item.destination_binding is None:
+                        raise StorageMigrationError(
+                            f"item {index} has no destination binding",
+                            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+                        )
+                    destination = inspect_storage_migration_destination(
+                        path=item.destination,
+                        kind=kind,
+                        expected_binding=item.destination_binding,
+                    )
+                    if destination.state != "owned":
+                        raise StorageMigrationError(
+                            f"activated destination cannot be proven at "
+                            f"{item.destination}",
+                            code="STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED",
+                        )
+                    if (
+                        hooks.validate_activated is not None
+                        and index not in journal.activated_validated
+                    ):
+                        _call_hook(
+                            "validate_activated", hooks.validate_activated, index
+                        )
+                        journal = replace(
+                            journal,
+                            activated_validated=tuple(
+                                (*journal.activated_validated, index)
+                            ),
+                        )
+                        _persist_schema3(journal, journal_path)
+                    if journal.items[index].state == "activated":
+                        journal = _transition_item(journal, index, "post-verified")
+                    if journal.items[index].state == "post-verified":
+                        journal = _transition_item(journal, index, "cleanup-pending")
+                    if journal.items[index].state == "cleanup-pending":
+                        journal = _transition_item(journal, index, "complete")
+                    _persist_schema3(journal, journal_path)
+                    continue
+                if item.stage_path is None:
+                    raise StorageMigrationError(
+                        f"item {index} has no stage path",
+                        code="STORAGE_MIGRATION_JOURNAL_INVALID",
+                    )
+                if not item.stage_path.exists():
+                    if item.source_fingerprint is None or not item.source.exists():
+                        raise StorageMigrationError(
+                            f"cannot recreate stage for item {index}",
+                            code="STORAGE_MIGRATION_SOURCE_CHANGED",
+                        )
+                    journal = _transition_item(journal, index, "staging")
+                    _persist_schema3(journal, journal_path)
+                    if kind == "file":
+                        _copy_file(item.source, item.stage_path)
+                    else:
+                        _copy_tree(item.source, item.stage_path)
+                        if item.destination_binding is not None:
+                            write_storage_binding(
+                                item.stage_path, item.destination_binding
+                            )
+                    staged_fp = _migration_fingerprint(item.stage_path, kind)
+                    if staged_fp != item.source_fingerprint:
+                        raise StorageMigrationError(
+                            f"source changed while recovering item {index}",
+                            code="STORAGE_MIGRATION_SOURCE_CHANGED",
+                        )
+                    journal = _transition_item(
+                        journal, index, "staged", staged_fingerprint=staged_fp
+                    )
+                    _persist_schema3(journal, journal_path)
+                    item = journal.items[index]
+                if journal.items[index].state in {"staging", "staged"}:
+                    stage_path = item.stage_path
+                    if stage_path is None:
+                        raise StorageMigrationError(
+                            f"item {index} has no stage path",
+                            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+                        )
+                    staged_fp = _migration_fingerprint(stage_path, kind)
+                    journal = _transition_item(
+                        journal, index, "stage-verified", staged_fingerprint=staged_fp
+                    )
+                    _persist_schema3(journal, journal_path)
+                    item = journal.items[index]
+                if (
+                    hooks.validate_staged is not None
+                    and index not in journal.staged_validated
+                ):
+                    _call_hook("validate_staged", hooks.validate_staged, index)
+                    journal = replace(
+                        journal,
+                        staged_validated=tuple((*journal.staged_validated, index)),
+                    )
+                    _persist_schema3(journal, journal_path)
+                if journal.items[index].state == "stage-verified":
+                    destination_binding = item.destination_binding
+                    if destination_binding is None:
+                        raise StorageMigrationError(
+                            f"item {index} has no destination binding",
+                            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+                        )
+                    inspection = inspect_storage_migration_destination(
+                        path=item.destination,
+                        kind=kind,
+                        expected_binding=destination_binding,
+                    )
+                    if inspection.state == "owned":
+                        if item.backup_path is None:
+                            raise StorageMigrationError(
+                                f"item {index} is missing backup path",
+                                code="STORAGE_MIGRATION_JOURNAL_INVALID",
+                            )
+                        journal = _transition_item(journal, index, "backup-intent")
+                        _persist_schema3(journal, journal_path)
+                        _durable_rename(item.destination, item.backup_path)
+                        journal = _transition_item(journal, index, "backup-created")
+                        _persist_schema3(journal, journal_path)
+                    elif inspection.state not in {"absent"}:
+                        raise StorageMigrationError(
+                            f"destination changed during resume at {item.destination}",
+                            code="STORAGE_MIGRATION_DESTINATION_CHANGED",
+                        )
+                    journal = _transition_item(journal, index, "activation-intent")
+                    _persist_schema3(journal, journal_path)
+                    stage_path = item.stage_path
+                    if stage_path is None:
+                        raise StorageMigrationError(
+                            f"item {index} has no stage path",
+                            code="STORAGE_MIGRATION_JOURNAL_INVALID",
+                        )
+                    _durable_rename(stage_path, item.destination)
+                    activated_fp = _migration_fingerprint(item.destination, kind)
+                    journal = _transition_item(
+                        journal, index, "activated", activated_fingerprint=activated_fp
+                    )
+                    _persist_schema3(journal, journal_path)
+                if (
+                    hooks.validate_activated is not None
+                    and index not in journal.activated_validated
+                ):
+                    _call_hook("validate_activated", hooks.validate_activated, index)
+                    journal = replace(
+                        journal,
+                        activated_validated=tuple(
+                            (*journal.activated_validated, index)
+                        ),
+                    )
+                    _persist_schema3(journal, journal_path)
+                if journal.items[index].state == "activated":
+                    journal = _transition_item(journal, index, "post-verified")
+                    journal = _transition_item(journal, index, "cleanup-pending")
+                    journal = _transition_item(journal, index, "complete")
+                    _persist_schema3(journal, journal_path)
+            if journal.config_switches:
+                switch = journal.config_switches[0]
+                if switch.target_content is None:
+                    raise StorageMigrationError(
+                        "config switch target content is missing",
+                        code="STORAGE_MIGRATION_JOURNAL_INVALID",
+                    )
+                if not switch.verified:
+                    if (
+                        switch.destination.exists()
+                        and switch.target_fingerprint is not None
+                    ):
+                        current = fingerprint_storage_file(switch.destination)
+                        if current != switch.target_fingerprint:
+                            if (
+                                switch.expected_before_fingerprint is not None
+                                and current != switch.expected_before_fingerprint
+                            ):
+                                raise StorageMigrationError(
+                                    f"configuration changed during resume at "
+                                    f"{switch.destination}",
+                                    code="STORAGE_MIGRATION_CONFIG_SWITCH_FAILED",
+                                )
+                    atomic_write_text(switch.destination, switch.target_content)
+                    switch = replace(
+                        switch, applied=True, verified=True, state="activated"
+                    )
+                    journal = replace(journal, config_switches=(switch,))
+                    _persist_schema3(journal, journal_path)
+            if hooks.finalize is not None and not journal.finalized:
+                _call_hook("finalize", hooks.finalize)
+                journal = replace(journal, finalized=True)
+                _persist_schema3(journal, journal_path)
+            journal = replace(journal, phase="committed")
+            _persist_schema3(journal, journal_path)
+            journal = replace(journal, phase="cleaning-up")
+            _persist_schema3(journal, journal_path)
+            for item in journal.items:
+                if item.backup_path is not None and item.backup_path.exists():
+                    if item.backup_path.is_dir():
+                        shutil.rmtree(item.backup_path)
+                    else:
+                        item.backup_path.unlink()
+            journal = replace(journal, phase="complete")
+            _persist_schema3(journal, journal_path)
+            return _result_from_schema3(journal, journal_path, recommendation="resume")
+        except Exception as exc:
+            journal = replace(journal, phase="failed", error=str(exc)[:500])
+            try:
+                _persist_schema3(journal, journal_path)
+            except Exception:
+                pass
+            if isinstance(exc, StorageMigrationError):
+                raise
+            raise StorageMigrationError(
+                f"resume failed: {exc}", code="STORAGE_MIGRATION_RECOVERY_FAILED"
+            ) from exc
+
+
 def recover_storage_migration(
     journal_path: Path,
-) -> StorageMigrationResult:
-    """Return completed journal result or refuse incomplete recovery."""
-    journal = inspect_storage_migration(journal_path)
-    if journal.recovery_capability == "completed-only":
-        return StorageMigrationResult(
-            journal.migration_id,
-            journal.phase,
-            journal.items_completed
-            if journal.items_completed is not None
-            else len(journal.items),
-            journal.source_removed,
-            journal_path,
+    *,
+    policy: Literal["auto", "resume", "rollback"] = "auto",
+    dry_run: bool = False,
+    hooks: StorageMigrationHooks | None = None,
+    project_root: Path | None = None,
+) -> StorageMigrationResult | RecoveryAssessment:
+    """Inspect or recover a migration journal under an explicit safety policy."""
+    if policy not in {"auto", "resume", "rollback"}:
+        raise StorageMigrationError(
+            f"unsupported recovery policy {policy!r}",
+            code="STORAGE_MIGRATION_INVALID_ARGUMENT",
         )
-    raise StorageMigrationError(
-        f"migration journal {journal_path} is in phase {journal.phase}; "
-        "Ledgercore 0.5.1 can inspect this journal but cannot "
-        "safely resume it automatically",
-        code="STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED",
-    )
+    journal = inspect_storage_migration(journal_path)
+    if isinstance(journal, StorageMigrationJournal):
+        if journal.recovery_capability == "completed-only":
+            result = StorageMigrationResult(
+                journal.migration_id,
+                journal.phase,
+                journal.items_completed or len(journal.items),
+                journal.source_removed,
+                journal_path,
+            )
+            return result
+        raise StorageMigrationError(
+            f"migration journal {journal_path} requires manual intervention",
+            code="STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED",
+        )
+    assessment = _schema3_assessment(journal, journal_path, project_root=project_root)
+    if dry_run:
+        return assessment
+    if assessment.complete:
+        return _result_from_schema3(journal, journal_path, recommendation="complete")
+    selected = assessment.recommendation if policy == "auto" else policy
+    if (
+        selected == "manual-intervention"
+        or (selected == "resume" and not assessment.resumable)
+        or (selected == "rollback" and not assessment.rollbackable)
+    ):
+        raise StorageMigrationError(
+            "recovery requires manual intervention: "
+            f"{'; '.join(assessment.blockers) or 'policy is unsafe'}",
+            code="STORAGE_MIGRATION_MANUAL_INTERVENTION_REQUIRED",
+        )
+    root = (
+        project_root or journal.project_root or journal_path.parent.parent.parent
+    ).resolve(strict=False)
+    active_hooks = hooks or StorageMigrationHooks()
+    active_hooks.validate_requirements()
+    if selected == "rollback":
+        return _recover_schema3_rollback(journal, journal_path, root=root)
+    return _recover_schema3_resume(journal, journal_path, root=root, hooks=active_hooks)
 
 
 def plan_schema_v2_to_v3(loaded: Any) -> Any:
@@ -2247,14 +3473,36 @@ class MigrationLock:
 
 __all__ = [
     "MigrationRecoveryCapability",
+    "RecoveryAssessment",
+    "Schema3ConfigSwitchState",
+    "Schema3ItemJournalState",
+    "Schema3MigrationJournal",
+    "StorageDestinationInspection",
+    "StorageFingerprint",
+    "StorageFingerprintEntry",
+    "StorageMigrationHooks",
     "StorageMigrationItem",
     "StorageMigrationJournal",
     "StorageMigrationJournalItem",
     "StorageMigrationPlan",
+    "StorageMigrationPlanValidation",
     "StorageMigrationResult",
+    "DestinationPrecondition",
+    "DestinationKind",
+    "DestinationPolicy",
+    "MigrationItemPaths",
+    "MigrationItemState",
+    "MigrationLock",
+    "MigrationPhase",
     "execute_storage_migration",
+    "assess_storage_migration",
+    "fingerprint_storage_directory",
+    "fingerprint_storage_file",
     "inspect_storage_migration",
+    "inspect_storage_migration_destination",
     "plan_schema_v2_to_v3",
     "plan_storage_migration",
     "recover_storage_migration",
+    "validate_storage_migration_plan",
+    "write_schema3_journal",
 ]
