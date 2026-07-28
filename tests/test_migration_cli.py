@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tomlkit import dumps, table
+
 from ledgercore.cli import ExitCode, inspect_migration, recover_migration
 
 
@@ -33,21 +35,20 @@ def test_inspect_cli_exposes_schema3_recommendation_and_blockers(
     tmp_path: Path,
 ) -> None:
     journal = tmp_path / "complete.toml"
-    journal.write_text(
-        "schema_version = 3\n"
-        'migration_id = "cli-test-0001"\n'
-        'project_uuid = "project"\n'
-        'phase = "complete"\n'
-        'mode = "copy"\n'
-        'verify = "sha256"\n'
-        f'project_root = "{tmp_path}"\n'
-        "plan_digest = " + '"' + "0" * 64 + '"\n'
-        "requires_staged_validation = false\n"
-        "requires_activated_validation = false\n"
-        "requires_finalization = false\n"
-        "items = {}\n",
-        encoding="utf-8",
-    )
+    document = table()
+    document.add("schema_version", 3)
+    document.add("migration_id", "cli-test-0001")
+    document.add("project_uuid", "project")
+    document.add("phase", "complete")
+    document.add("mode", "copy")
+    document.add("verify", "sha256")
+    document.add("project_root", str(tmp_path))
+    document.add("plan_digest", "0" * 64)
+    document.add("requires_staged_validation", False)
+    document.add("requires_activated_validation", False)
+    document.add("requires_finalization", False)
+    document.add("items", table())
+    journal.write_text(dumps(document), encoding="utf-8")
 
     response = inspect_migration(journal)
 

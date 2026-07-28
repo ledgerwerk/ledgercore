@@ -75,10 +75,10 @@ is provided explicitly. Use a placeholder for repeatable local runs:
 SETUPTOOLS_SCM_PRETEND_VERSION=X.Y.Z python -m build
 ```
 
-For an actual 0.4.0 release build, use `0.4.0`:
+For the `0.6.0` release build, use `0.6.0`:
 
 ```bash
-SETUPTOOLS_SCM_PRETEND_VERSION=0.4.0 python -m build
+SETUPTOOLS_SCM_PRETEND_VERSION=0.6.0 python -m build
 ```
 
 This produces `dist/ledgercore-<version>.tar.gz` and
@@ -107,7 +107,7 @@ python -m venv "$smoke_dir"
 "$smoke_dir/bin/python" scripts/smoke_wheel.py
 ```
 
-The script must print `ledgercore 0.4.0 smoke test passed` and exit 0. The
+The script must print `ledgercore 0.6.0 smoke test passed` and exit 0. The
 source-tree smoke test (`tests/test_smoke_wheel_source.py`) covers the same
 `main()` function and must also pass in CI.
 
@@ -149,5 +149,6 @@ python -m twine upload dist/*
 
 `ledgercore` is pre-1.0. Patch releases preserve the current minor API where
 practical. Minor releases may intentionally evolve public APIs before 1.0,
-with changelog and migration guidance. The 0.4.0 release adds the fixed
-sibling-ledger workspace convention while preserving namespaced root overrides.
+with changelog and migration guidance. The 0.6.0 release adds the schema-3
+storage migration safeguards and validation improvements documented in the
+changelog.
