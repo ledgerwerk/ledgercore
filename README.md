@@ -164,7 +164,6 @@ assert adr_ids.format(13, segment="content") == "adr-content-0013"
 
 `NumericIdFormat` remains available as a simpler compatibility wrapper.
 
-
 For independently generated, time-ordered IDs, use `Uuid7IdFormat`:
 
 ```python

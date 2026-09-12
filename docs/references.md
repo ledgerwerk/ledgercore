@@ -84,7 +84,6 @@ assert ref.file_ref == "tl-task-0001"
 
 `parse_resource_ref` accepts canonical, file-safe, legacy, and local forms.
 
-
 For UUIDv7 references, use the parallel parser family:
 
 ```python

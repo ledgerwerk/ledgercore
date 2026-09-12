@@ -118,7 +118,7 @@ Numeric and UUIDv7 ID formatting, parsing, generation, and slug helpers.
 | `LedgerIdParts`                                                                                  | Frozen dataclass: `prefix`, `number`, `segment`.                                                                                 |
 | `LedgerIdFormat(prefix, separator="-", width=4, segment_separator=None, segment_required=False)` | Configurable ID format with optional segment support. Methods: `format`, `parse`, `parse_parts`, `next`, `is_valid`, `filename`. |
 | `NumericIdFormat(prefix, separator="-", width=4)`                                                | Simpler ID format for compatibility. Methods: `format`, `parse`, `next`.                                                         |
-| `Uuid7IdFormat(prefix, separator="-")`                                                       | UUIDv7 ID format. Methods: `new`, `format`, `parse`, `is_valid`, `filename`, `timestamp_ms`.                                  |
+| `Uuid7IdFormat(prefix, separator="-")`                                                           | UUIDv7 ID format. Methods: `new`, `format`, `parse`, `is_valid`, `filename`, `timestamp_ms`.                                     |
 | `parse_prefixed_number(value, *, prefix, separator="-", width=4)`                                | Parse a prefixed numeric ID and return the number.                                                                               |
 | `next_prefixed_id(prefix, existing_ids, *, separator="-", width=4)`                              | Return the next prefixed ID given existing IDs.                                                                                  |
 | `slugify_ref(value, *, empty="item")`                                                            | Lowercase, trim, collapse non-alphanumeric runs to dashes.                                                                       |
@@ -131,10 +131,10 @@ UUIDv7 generation, validation, and timestamp extraction backed by `uuid6` for
 Python 3.10 through 3.13. Generation is serialized for concurrent callers in one
 process; UUIDv7 values are not globally causal or monotonic across machines.
 
-| Symbol | Description |
-| --- | --- |
-| `uuid7()` | Generate a standard `uuid.UUID` with version 7. |
-| `parse_uuid7(value)` | Normalize and require a UUIDv7 value. |
+| Symbol                      | Description                                      |
+| --------------------------- | ------------------------------------------------ |
+| `uuid7()`                   | Generate a standard `uuid.UUID` with version 7.  |
+| `parse_uuid7(value)`        | Normalize and require a UUIDv7 value.            |
 | `uuid7_timestamp_ms(value)` | Extract the embedded Unix millisecond timestamp. |
 
 ## `ledgercore.io`
@@ -277,21 +277,21 @@ filesystem access.
 
 Canonical numeric and UUIDv7 cross-ledger resource references.
 
-| Symbol                                 | Description                                                                                                            |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `RefStyle`                             | Literal type: `"canonical"`, `"file"`, `"local"`.                                                                      |
-| `LedgerResourceRef`                    | Frozen dataclass with properties: `local_id`, `is_global`, `global_ref`, `file_ref`. Methods: `format`, `with_ledger`. |
-| `LedgerUuidResourceRef`                 | Frozen UUIDv7 reference with `local_id`, `is_global`, `global_ref`, and `file_ref` properties.                                  |
-| `parse_resource_ref(value, *, ...)`    | Parse a canonical, file-safe, legacy, or local resource reference.                                                     |
-| `parse_global_ref(value, **kwargs)`    | Parse and require a ledger namespace.                                                                                  |
-| `parse_local_ref(value, *, width=4)`   | Parse a local kind-number ID without assigning a ledger.                                                               |
-| `is_resource_ref(value, **kwargs)`     | Return True if value is a valid resource ref.                                                                          |
-| `parse_uuid_resource_ref(value, *, ...)` | Parse UUIDv7 local, canonical global, or file-safe global references.                                                       |
-| `parse_uuid_global_ref(value, **kwargs)` | Parse a UUIDv7 reference and require a ledger namespace.                                                                |
+| Symbol                                   | Description                                                                                                            |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `RefStyle`                               | Literal type: `"canonical"`, `"file"`, `"local"`.                                                                      |
+| `LedgerResourceRef`                      | Frozen dataclass with properties: `local_id`, `is_global`, `global_ref`, `file_ref`. Methods: `format`, `with_ledger`. |
+| `LedgerUuidResourceRef`                  | Frozen UUIDv7 reference with `local_id`, `is_global`, `global_ref`, and `file_ref` properties.                         |
+| `parse_resource_ref(value, *, ...)`      | Parse a canonical, file-safe, legacy, or local resource reference.                                                     |
+| `parse_global_ref(value, **kwargs)`      | Parse and require a ledger namespace.                                                                                  |
+| `parse_local_ref(value, *, width=4)`     | Parse a local kind-number ID without assigning a ledger.                                                               |
+| `is_resource_ref(value, **kwargs)`       | Return True if value is a valid resource ref.                                                                          |
+| `parse_uuid_resource_ref(value, *, ...)` | Parse UUIDv7 local, canonical global, or file-safe global references.                                                  |
+| `parse_uuid_global_ref(value, **kwargs)` | Parse a UUIDv7 reference and require a ledger namespace.                                                               |
 | `parse_uuid_local_ref(value)`            | Parse a local UUIDv7 resource ID without assigning a ledger.                                                           |
 | `is_uuid_resource_ref(value, **kwargs)`  | Return True if value is a valid UUIDv7 resource reference.                                                             |
-| `normalize_ref_token(value, *, label)` | Lowercase and validate a short token.                                                                                  |
-| `normalize_kind(value)`                | Lowercase, replace underscores with hyphens, and validate a resource kind.                                             |
+| `normalize_ref_token(value, *, label)`   | Lowercase and validate a short token.                                                                                  |
+| `normalize_kind(value)`                  | Lowercase, replace underscores with hyphens, and validate a resource kind.                                             |
 
 (ledgercoretime)=
 

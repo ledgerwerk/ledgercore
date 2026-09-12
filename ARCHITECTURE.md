@@ -221,7 +221,7 @@ ledgercore
 | `yamlio`          | Mapping-only YAML and deterministic output                              | PyYAML, atomic, errors                                              |
 | `frontmatter`     | YAML front matter and source iteration                                  | PyYAML, atomic, errors                                              |
 | `tomlio`          | Round-trip TOML I/O with comment preservation                           | tomlkit, atomic, errors                                             |
-| `ids`             | Configurable prefixed numeric and UUIDv7 IDs and slugs                 | Standard library, uuids                                             |
+| `ids`             | Configurable prefixed numeric and UUIDv7 IDs and slugs                  | Standard library, uuids                                             |
 | `refs`            | Numeric and UUIDv7 canonical/local/file resource references             | errors, uuids                                                       |
 | `paths`           | Strict path validation and confinement                                  | pathlib, errors                                                     |
 | `path_text`       | Human-authored path matching normalization                              | Unicode/regex stdlib                                                |
