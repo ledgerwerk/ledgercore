@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import shutil
-import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -36,6 +35,7 @@ from ledgercore.tomlio import (
     render_ledger_local_config,
     render_ledger_manifest,
 )
+from ledgercore.uuids import uuid7
 
 MigrationStrategy = Literal["copy", "rebuild", "noop"]
 MigrationMode = Literal["copy", "move"]
@@ -1057,7 +1057,7 @@ def plan_storage_migration(
     if any(item.strategy == "rebuild" for item in items):
         warnings.append("cache mounts use rebuild strategy by default")
     return StorageMigrationPlan(
-        migration_id=uuid.uuid4().hex,
+        migration_id=uuid7().hex,
         project_uuid=target_manifest.project_uuid,
         items=tuple(items),
         config_changes=target_overrides,

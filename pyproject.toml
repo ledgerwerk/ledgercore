@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling<1.28", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [
   { name = "holgern" },
 ]
-keywords = ["ledger", "storage", "frontmatter", "ids", "yaml", "json"]
+keywords = ["ledger", "storage", "frontmatter", "ids", "uuid", "uuid7", "yaml", "json"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -29,6 +29,7 @@ dependencies = [
     "PyYAML",
     "platformdirs",
     "tomlkit",
+    "uuid6>=2025.0.0,<2026",
 ]
 
 [project.urls]

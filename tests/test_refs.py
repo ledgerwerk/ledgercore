@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from ledgercore.errors import IdFormatError
 from ledgercore.refs import (
     LedgerResourceRef,
+    LedgerUuidResourceRef,
     is_resource_ref,
+    is_uuid_resource_ref,
     normalize_kind,
     normalize_ref_token,
     parse_global_ref,
     parse_local_ref,
     parse_resource_ref,
+    parse_uuid_global_ref,
+    parse_uuid_local_ref,
+    parse_uuid_resource_ref,
 )
 
 
@@ -280,3 +287,44 @@ class TestFrozenDataclass:
         ref = parse_resource_ref("tl:task-0001")
         with pytest.raises(AttributeError):
             ref.number = 2  # type: ignore[misc]
+
+
+UUID7_TEXT = "0199a1b2-3c4d-7e5f-8a90-123456789abc"
+
+
+class TestUuid7ResourceRefs:
+    def test_local_global_and_file_forms(self) -> None:
+        local = parse_uuid_local_ref(f"task-{UUID7_TEXT}")
+        assert local.ledger is None
+        assert local.local_id == f"task-{UUID7_TEXT}"
+
+        ref = parse_uuid_resource_ref(f"tl:task-{UUID7_TEXT}")
+        assert ref.ledger == "tl"
+        assert ref.kind == "task"
+        assert ref.resource_uuid.version == 7
+        assert ref.global_ref == f"tl:task-{UUID7_TEXT}"
+        assert ref.file_ref == f"tl-task-{UUID7_TEXT}"
+        assert parse_uuid_global_ref(ref.file_ref).global_ref == ref.global_ref
+
+    def test_normalizes_case_and_default_ledger(self) -> None:
+        ref = parse_uuid_resource_ref(f"task-{UUID7_TEXT.upper()}", default_ledger="TL")
+        assert ref.global_ref == f"tl:task-{UUID7_TEXT}"
+        direct = LedgerUuidResourceRef(
+            ledger="TL", kind="TASK", resource_uuid=uuid.UUID(UUID7_TEXT)
+        )
+        assert direct.global_ref == ref.global_ref
+
+    def test_allowed_values_and_rejections(self) -> None:
+        assert is_uuid_resource_ref(f"tl:task-{UUID7_TEXT}", allowed_ledgers={"tl"})
+        assert is_uuid_resource_ref(f"tl:task-{UUID7_TEXT}", allowed_kinds={"task"})
+        assert not is_uuid_resource_ref(f"tl:task-{UUID7_TEXT}", allowed_ledgers={"al"})
+        assert not is_uuid_resource_ref(f"tl:task-{UUID7_TEXT}", allowed_kinds={"adr"})
+        assert not is_uuid_resource_ref("tl:task-0001")
+        assert not is_uuid_resource_ref(f"tl:task-{uuid.uuid4()}")
+        with pytest.raises(IdFormatError):
+            parse_uuid_resource_ref(f"tl:task-{uuid.uuid4()}")
+
+    def test_numeric_parser_remains_separate(self) -> None:
+        numeric = parse_resource_ref("tl:task-0001")
+        assert numeric.number == 1
+        assert not is_uuid_resource_ref("tl:task-0001")

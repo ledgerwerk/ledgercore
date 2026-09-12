@@ -76,3 +76,22 @@ def test_detailed_layout_dataclasses_only_under_layout_module() -> None:
             f"{name} must NOT be exposed at the package root; "
             "import it from ledgercore.layout"
         )
+
+
+def test_root_exports_uuid7_identity_facade() -> None:
+    from ledgercore import (
+        LedgerUuidResourceRef,
+        Uuid7IdFormat,
+        parse_uuid7,
+        parse_uuid_resource_ref,
+        uuid7,
+        uuid7_timestamp_ms,
+    )
+
+    value = uuid7()
+    assert parse_uuid7(value) == value
+    assert uuid7_timestamp_ms(value) == value.int >> 80
+    identifier = Uuid7IdFormat(prefix="task").format(value)
+    ref = parse_uuid_resource_ref(f"tl:{identifier}")
+    assert isinstance(ref, LedgerUuidResourceRef)
+    assert ref.global_ref == f"tl:{identifier}"

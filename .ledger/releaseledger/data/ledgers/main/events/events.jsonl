@@ -74,3 +74,6 @@
 {"data":{"fields":["source_refs"]},"entry_id":"entry-0009","event":"entry.updated","event_id":"event-0074","record_revisions":{"entry:0.6.1/entry-0009":2},"release_version":"0.6.1","schema_version":2}
 {"data":{"fields":["source_refs"]},"entry_id":"entry-0010","event":"entry.updated","event_id":"event-0075","record_revisions":{"entry:0.6.1/entry-0010":2},"release_version":"0.6.1","schema_version":2}
 {"data":{"released_at":"2026-07-28"},"event":"release.finalized","event_id":"event-0076","record_revisions":{"release:0.6.1":4},"release_version":"0.6.1","schema_version":2}
+{"data":{"status":"planned"},"event":"release.created","event_id":"event-0077","record_revisions":{"release:0.7.0":1},"release_version":"0.7.0","schema_version":2}
+{"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0078","record_revisions":{"entry:0.7.0/entry-0001":1,"release:0.7.0":2},"release_version":"0.7.0","schema_version":2}
+{"data":{"added_source_refs":[],"fields":["body","paths"],"reason":"Include the migration-ID compatibility impact in the reviewed release note.","removed_source_refs":[],"source_refs_mode":"unchanged"},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0079","record_revisions":{"entry:0.7.0/entry-0001":2},"release_version":"0.7.0","schema_version":2}

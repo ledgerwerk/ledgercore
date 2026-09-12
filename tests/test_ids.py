@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from ledgercore.ids import (
     LedgerIdFormat,
     NumericIdFormat,
+    Uuid7IdFormat,
     next_prefixed_id,
     parse_prefixed_number,
     slugify_ref,
@@ -299,3 +302,37 @@ class TestSlugifyRef:
 
     def test_only_dashes(self) -> None:
         assert slugify_ref("---") == "item"
+
+
+class TestUuid7IdFormat:
+    def test_new_format_and_parse(self) -> None:
+        fmt = Uuid7IdFormat(prefix="task")
+        value = fmt.new()
+        assert value.startswith("task-")
+        parsed = fmt.parse(value)
+        assert parsed.version == 7
+        assert fmt.format(str(parsed).upper()) == value
+
+    def test_validity_and_filename(self) -> None:
+        fmt = Uuid7IdFormat(prefix="task")
+        value = fmt.new()
+        assert fmt.is_valid(value)
+        assert fmt.filename(value, extension=".md") == f"{value}.md"
+        assert fmt.timestamp_ms(value) == fmt.parse(value).int >> 80
+
+    def test_rejects_invalid_values(self) -> None:
+        fmt = Uuid7IdFormat(prefix="task")
+        assert not fmt.is_valid("task-0001")
+        assert not fmt.is_valid("run-" + str(uuid.uuid4()))
+        with pytest.raises(ValueError, match="Prefix"):
+            Uuid7IdFormat(prefix="")
+        with pytest.raises(ValueError, match="Separator"):
+            Uuid7IdFormat(prefix="task", separator="")
+        with pytest.raises(ValueError, match="filename-safe"):
+            Uuid7IdFormat(prefix="task/name")
+
+    def test_does_not_allocate_from_existing_ids(self) -> None:
+        fmt = Uuid7IdFormat(prefix="task")
+        first = fmt.new()
+        second = fmt.new()
+        assert first != second

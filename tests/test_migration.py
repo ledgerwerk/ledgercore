@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import uuid
 from pathlib import Path
 
 import pytest
@@ -615,3 +616,10 @@ def test_migration_lock_is_private_and_replaces_stale_diagnostics(
         assert lock_path.read_text(encoding="utf-8") == "new-id"
 
     assert lock_path.exists()
+
+
+def test_new_migration_id_is_uuid7(tmp_path: Path) -> None:
+    plan, _, _, _, _ = _make_plan_external_to_user_data(tmp_path)
+    generated = uuid.UUID(hex=plan.migration_id)
+    assert generated.version == 7
+    assert len(plan.migration_id) == 32

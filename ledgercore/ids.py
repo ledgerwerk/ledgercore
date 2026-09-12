@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
+
+from ledgercore.uuids import parse_uuid7, uuid7, uuid7_timestamp_ms
 
 
 @dataclass(frozen=True)
@@ -196,6 +199,59 @@ class NumericIdFormat:
                 if num > max_num:
                     max_num = num
         return self.format(max_num + 1)
+
+
+@dataclass(frozen=True)
+class Uuid7IdFormat:
+    """Configurable prefixed UUIDv7 ID format."""
+
+    prefix: str
+    separator: str = "-"
+
+    def __post_init__(self) -> None:
+        if not self.prefix:
+            raise ValueError("Prefix must not be empty")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", self.prefix):
+            raise ValueError("Prefix must be a filename-safe token")
+        if not self.separator:
+            raise ValueError("Separator must not be empty")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", self.separator):
+            raise ValueError("Separator must be a filename-safe token")
+
+    def new(self) -> str:
+        """Generate a new canonical prefixed UUIDv7 ID."""
+        return self.format(uuid7())
+
+    def format(self, value: str | uuid.UUID) -> str:
+        """Format a UUIDv7 as a canonical prefixed ID."""
+        parsed = parse_uuid7(value)
+        return f"{self.prefix}{self.separator}{parsed}"
+
+    def parse(self, value: str) -> uuid.UUID:
+        """Parse a canonical prefixed UUIDv7 ID."""
+        expected = f"{self.prefix}{self.separator}"
+        if not value.startswith(expected):
+            raise ValueError(f"ID '{value}' does not match prefix '{expected}'")
+        return parse_uuid7(value[len(expected) :])
+
+    def is_valid(self, value: object) -> bool:
+        """Return whether value is a valid canonical prefixed UUIDv7 ID."""
+        if not isinstance(value, str):
+            return False
+        try:
+            self.parse(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def filename(self, value: str, *, extension: str) -> str:
+        """Convert a canonical ID to a filename with the given extension."""
+        self.parse(value)
+        return f"{value}{extension}"
+
+    def timestamp_ms(self, value: str) -> int:
+        """Return the UUIDv7 timestamp embedded in a canonical ID."""
+        return uuid7_timestamp_ms(self.parse(value))
 
 
 def _validate_number(number: int) -> None:

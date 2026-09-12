@@ -3,15 +3,32 @@
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Literal
 
 from ledgercore.errors import IdFormatError
+from ledgercore.uuids import parse_uuid7
 
 RefStyle = Literal["canonical", "file", "local"]
 
 _TOKEN_RE = re.compile(r"^[a-z][a-z0-9]*$")
 _KIND_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+_UUID_TEXT = (
+    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+)
+_UUID_CANONICAL_RE = re.compile(
+    rf"^(?P<ledger>[A-Za-z][A-Za-z0-9]*):"
+    rf"(?P<kind>[A-Za-z][A-Za-z0-9_-]*)-(?P<resource_uuid>{_UUID_TEXT})$"
+)
+_UUID_LOCAL_RE = re.compile(
+    rf"^(?P<kind>[A-Za-z][A-Za-z0-9_-]*)-(?P<resource_uuid>{_UUID_TEXT})$"
+)
+_UUID_FILE_RE = re.compile(
+    rf"^(?P<ledger>[A-Za-z][A-Za-z0-9]*)-"
+    rf"(?P<kind>[A-Za-z][A-Za-z0-9_-]*)-(?P<resource_uuid>{_UUID_TEXT})$"
+)
 _CANONICAL_RE = re.compile(
     r"^(?P<ledger>[A-Za-z][A-Za-z0-9]*):"
     r"(?P<kind>[A-Za-z][A-Za-z0-9_-]*)-"
@@ -228,6 +245,158 @@ def is_resource_ref(value: object, **kwargs: object) -> bool:
     except IdFormatError:
         return False
     return True
+
+
+@dataclass(frozen=True)
+class LedgerUuidResourceRef:
+    """A ledger-neutral reference to a UUIDv7 resource record."""
+
+    ledger: str | None
+    kind: str
+    resource_uuid: uuid.UUID
+
+    def __post_init__(self) -> None:
+        if self.ledger is not None:
+            object.__setattr__(
+                self, "ledger", normalize_ref_token(self.ledger, label="ledger")
+            )
+        object.__setattr__(self, "kind", normalize_kind(self.kind))
+        try:
+            normalized_uuid = parse_uuid7(self.resource_uuid)
+        except (TypeError, ValueError) as exc:
+            raise IdFormatError(
+                f"Invalid UUIDv7 resource ID: {self.resource_uuid!r}"
+            ) from exc
+        object.__setattr__(self, "resource_uuid", normalized_uuid)
+
+    @property
+    def local_id(self) -> str:
+        """The local ID without a ledger namespace."""
+        return f"{self.kind}-{self.resource_uuid}"
+
+    @property
+    def is_global(self) -> bool:
+        """True when a ledger namespace is attached."""
+        return self.ledger is not None
+
+    @property
+    def global_ref(self) -> str:
+        """The canonical global reference."""
+        if self.ledger is None:
+            raise IdFormatError("Cannot format a global ref without a ledger code")
+        return f"{self.ledger}:{self.local_id}"
+
+    @property
+    def file_ref(self) -> str:
+        """The file-safe global reference."""
+        if self.ledger is None:
+            raise IdFormatError("Cannot format a file ref without a ledger code")
+        return f"{self.ledger}-{self.local_id}"
+
+    def format(self, style: RefStyle = "canonical") -> str:
+        """Format the reference in canonical, file-safe, or local style."""
+        if style == "canonical":
+            return self.global_ref
+        if style == "file":
+            return self.file_ref
+        if style == "local":
+            return self.local_id
+        raise IdFormatError(f"Unsupported ref style: {style}")
+
+
+def parse_uuid_resource_ref(
+    value: str,
+    *,
+    default_ledger: str | None = None,
+    allow_file_alias: bool = True,
+    allowed_ledgers: set[str] | None = None,
+    allowed_kinds: set[str] | None = None,
+) -> LedgerUuidResourceRef:
+    """Parse a UUIDv7 local, canonical, or file-safe resource reference."""
+    if not isinstance(value, str):
+        raise IdFormatError("Resource ref must be a string")
+    raw = value.strip()
+    if not raw:
+        raise IdFormatError("Resource ref must not be empty")
+
+    match = _UUID_CANONICAL_RE.fullmatch(raw)
+    ledger: str | None
+    if match is not None:
+        ledger = match.group("ledger")
+    elif allow_file_alias and (file_match := _UUID_FILE_RE.fullmatch(raw)) is not None:
+        match = file_match
+        ledger = match.group("ledger")
+    elif (local_match := _UUID_LOCAL_RE.fullmatch(raw)) is not None:
+        match = local_match
+        ledger = default_ledger
+    else:
+        match = None
+        ledger = None
+
+    if match is None:
+        raise IdFormatError(f"Invalid UUID resource ref: {value!r}")
+    ref = _build_uuid_ref(ledger, match.group("kind"), match.group("resource_uuid"))
+    _check_uuid_allowed(
+        ref, allowed_ledgers=allowed_ledgers, allowed_kinds=allowed_kinds
+    )
+    return ref
+
+
+def parse_uuid_global_ref(value: str, **kwargs: object) -> LedgerUuidResourceRef:
+    """Parse a UUIDv7 reference and require a ledger namespace."""
+    ref = parse_uuid_resource_ref(value, **kwargs)  # type: ignore[arg-type]
+    if ref.ledger is None:
+        raise IdFormatError(f"Resource ref is local, not global: {value!r}")
+    return ref
+
+
+def parse_uuid_local_ref(value: str) -> LedgerUuidResourceRef:
+    """Parse a local UUIDv7 kind-ID without assigning a ledger."""
+    ref = parse_uuid_resource_ref(value, allow_file_alias=False)
+    if ref.ledger is not None:
+        raise IdFormatError(f"Resource ref is global, not local: {value!r}")
+    return ref
+
+
+def is_uuid_resource_ref(value: object, **kwargs: object) -> bool:
+    """Return whether value is a valid UUIDv7 resource reference."""
+    if not isinstance(value, str):
+        return False
+    try:
+        parse_uuid_resource_ref(value, **kwargs)  # type: ignore[arg-type]
+    except IdFormatError:
+        return False
+    return True
+
+
+def _build_uuid_ref(
+    ledger: str | None, kind: str, uuid_text: str
+) -> LedgerUuidResourceRef:
+    try:
+        resource_uuid = parse_uuid7(uuid_text)
+        return LedgerUuidResourceRef(
+            ledger=ledger, kind=kind, resource_uuid=resource_uuid
+        )
+    except (TypeError, ValueError, IdFormatError) as exc:
+        raise IdFormatError(f"Invalid UUID resource ref UUID: {uuid_text!r}") from exc
+
+
+def _check_uuid_allowed(
+    ref: LedgerUuidResourceRef,
+    *,
+    allowed_ledgers: set[str] | None,
+    allowed_kinds: set[str] | None,
+) -> None:
+    if allowed_ledgers is not None:
+        normalized_ledgers = {
+            normalize_ref_token(item, label="ledger") for item in allowed_ledgers
+        }
+        if ref.ledger is not None and ref.ledger not in normalized_ledgers:
+            raise IdFormatError(f"Ledger code is not allowed: {ref.ledger}")
+    if allowed_kinds is not None:
+        normalized_kinds = {normalize_kind(item) for item in allowed_kinds}
+        if ref.kind not in normalized_kinds:
+            raise IdFormatError(f"Resource kind is not allowed: {ref.kind}")
 
 
 def _parse_file_alias(value: str, *, width: int) -> LedgerResourceRef | None:

@@ -22,17 +22,20 @@ import tempfile
 from pathlib import Path
 
 from ledgercore import (
+    LedgerUuidResourceRef,
+    Uuid7IdFormat,
     __version__,
     locate_ledger_project,
     parse_ledger_project_manifest,
     resolve_ledger_layout,
+    uuid7,
 )
 from ledgercore.errors import IdFormatError
 from ledgercore.frontmatter import render_front_matter_text, split_front_matter_text
 from ledgercore.ids import LedgerIdFormat
 from ledgercore.jsonl import load_jsonl_object_map, write_jsonl_objects
 from ledgercore.layout import PlatformRoots
-from ledgercore.refs import parse_resource_ref
+from ledgercore.refs import parse_resource_ref, parse_uuid_resource_ref
 from ledgercore.time import utc_now_iso
 
 
@@ -45,6 +48,15 @@ def main() -> int:
     assert fmt.parse("task-0001") == 1
     assert fmt.is_valid("task-0001")
     assert not fmt.is_valid("task-0000")
+
+    value = uuid7()
+    assert value.version == 7
+    ids = Uuid7IdFormat(prefix="task")
+    task_id = ids.format(value)
+    assert ids.parse(task_id) == value
+    uuid_ref = LedgerUuidResourceRef(ledger="tl", kind="task", resource_uuid=value)
+    assert uuid_ref.global_ref == f"tl:{task_id}"
+    assert parse_uuid_resource_ref(uuid_ref.file_ref).global_ref == uuid_ref.global_ref
 
     ref = parse_resource_ref("tl:task-0001")
     assert ref.global_ref == "tl:task-0001"

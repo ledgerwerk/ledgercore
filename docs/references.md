@@ -13,8 +13,17 @@ adr-0002
 spec-0003
 ```
 
-A local ID has the form `<kind>-<number>`, where kind is a lowercase alphanumeric
-token and number is a zero-padded positive integer.
+A numeric local ID has the form `<kind>-<number>`, where kind is a lowercase
+alphanumeric token and number is a zero-padded positive integer. UUIDv7 local IDs
+use `<kind>-<uuidv7>`, for example:
+
+```text
+task-0199a1b2-3c4d-7e5f-8a90-123456789abc
+```
+
+UUIDv7 IDs are independently generated and time ordered. Their timestamp is
+approximate, and the value should be treated as an identifier rather than a
+secret.
 
 ## Global refs
 
@@ -22,6 +31,7 @@ When linking records across ledgers, use canonical global refs:
 
 ```text
 <ledger>:<kind>-<number>
+<ledger>:<kind>-<uuidv7>
 ```
 
 Examples:
@@ -30,6 +40,7 @@ Examples:
 tl:task-0001
 al:adr-0002
 sw:spec-0003
+tl:task-0199a1b2-3c4d-7e5f-8a90-123456789abc
 ```
 
 The ledger code is a short lowercase token that identifies the originating
@@ -72,6 +83,21 @@ assert ref.file_ref == "tl-task-0001"
 ```
 
 `parse_resource_ref` accepts canonical, file-safe, legacy, and local forms.
+
+
+For UUIDv7 references, use the parallel parser family:
+
+```python
+from ledgercore import parse_uuid_resource_ref
+
+ref = parse_uuid_resource_ref("tl:task-0199a1b2-3c4d-7e5f-8a90-123456789abc")
+assert ref.global_ref == "tl:task-0199a1b2-3c4d-7e5f-8a90-123456789abc"
+assert ref.file_ref == "tl-task-0199a1b2-3c4d-7e5f-8a90-123456789abc"
+```
+
+Use `parse_uuid_global_ref`, `parse_uuid_local_ref`, and
+`is_uuid_resource_ref` when a UUID-specific type or validation result is needed.
+The numeric parser remains separate and continues to return `LedgerResourceRef`.
 When parsing a local ref, set `default_ledger` to attach a namespace:
 
 ```python
@@ -111,8 +137,8 @@ from ledgercore.refs import LedgerResourceRef
 ref = LedgerResourceRef(ledger="tl", kind="task", number=1)
 
 ref.format("canonical")  # "tl:task-0001"
-ref.format("file")       # "tl-task-0001"
-ref.format("local")      # "task-0001"
+ref.format("file")  # "tl-task-0001"
+ref.format("local")  # "task-0001"
 ```
 
 ## Checking validity

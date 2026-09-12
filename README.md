@@ -10,7 +10,7 @@ Generic, typed storage, project-layout, and reference primitives for ledger-like
 `ledgercore` is a small Python library for projects that store structured records
 as files. It provides reusable primitives for atomic writes, YAML front matter,
 deterministic JSON/YAML storage, safe relative paths, Ledger-family project
-layout discovery and resolution, numeric IDs, and cross-ledger references.
+layout discovery and resolution, numeric and UUIDv7 IDs, and cross-ledger references.
 
 It has no CLI and no dependency on any downstream ledger application.
 
@@ -32,7 +32,8 @@ reinvent them.
 - Generic content fingerprints and path-text normalization.
 - Upward config discovery.
 - Prefixed numeric ID formatting.
-- Cross-ledger references such as `tl:task-0001`.
+- Distributed UUIDv7 ID generation and validation.
+- Cross-ledger references such as `tl:task-0001` and `tl:task-<uuidv7>`.
 - A typed public API and shared exception hierarchy.
 
 ## What is not included
@@ -54,6 +55,7 @@ Requirements:
 - Python 3.10+
 - PyYAML
 - platformdirs
+- uuid6 (used by the UUIDv7 facade)
 
 ## Quick start
 
@@ -80,6 +82,11 @@ assert ref.global_ref == "tl:task-0003"
 
 ## Cross-ledger references
 
+Ledgercore supports both numeric and UUIDv7 resource IDs. Numeric IDs are short
+and human friendly, but require coordinated allocation. UUIDv7 IDs are longer,
+include an approximate creation timestamp, and can be generated independently
+without a shared counter.
+
 Inside a single ledger, keep local IDs short:
 
 ```text
@@ -91,6 +98,7 @@ When linking records across ledgers, use canonical global refs:
 
 ```text
 <ledger>:<kind>-<number>
+<ledger>:<kind>-<uuidv7>
 ```
 
 Examples:
@@ -99,6 +107,7 @@ Examples:
 tl:task-0001
 al:adr-0002
 sw:spec-0003
+tl:task-0199a1b2-3c4d-7e5f-8a90-123456789abc
 ```
 
 A cross-ledger link can then store both endpoints unambiguously:
@@ -131,7 +140,7 @@ assert ref.file_ref == "tl-task-0001"
 
 ## ID formatting
 
-Use `LedgerIdFormat` as the primary ID formatter:
+Use `LedgerIdFormat` as the primary numeric ID formatter:
 
 ```python
 from ledgercore.ids import LedgerIdFormat
@@ -155,11 +164,32 @@ assert adr_ids.format(13, segment="content") == "adr-content-0013"
 
 `NumericIdFormat` remains available as a simpler compatibility wrapper.
 
+
+For independently generated, time-ordered IDs, use `Uuid7IdFormat`:
+
+```python
+from ledgercore import Uuid7IdFormat
+
+task_ids = Uuid7IdFormat(prefix="task")
+task_id = task_ids.new()
+assert task_id.startswith("task-")
+assert task_ids.is_valid(task_id)
+```
+
+Persist the complete `task-<uuidv7>` value. Short suffix selectors belong to a
+downstream application such as Taskledger and must not replace canonical IDs in
+front matter or cross-ledger references. UUIDv7 ordering is useful creation-time
+ordering, not proof of global causal order. UUIDv7 values expose an approximate
+creation timestamp and are identifiers, not secrets or authorization tokens.
+
 ## Front matter documents
 
 ```python
 from pathlib import Path
-from ledgercore.frontmatter import read_front_matter_document, write_front_matter_document
+from ledgercore.frontmatter import (
+    read_front_matter_document,
+    write_front_matter_document,
+)
 
 path = Path("records/task-0001.md")
 
@@ -304,7 +334,7 @@ layout = resolve_ledger_layout(
     project.manifest,
     "taskledger",
     local_overrides=project.local_overrides,
- )
+)
 ```
 
 The four storage kinds are `project`, `external`, `user-data`, and `cache`. Schema 3 has no provider, namespace, configurable mount path, config location, or generic scope. External roots may be project-relative; absolute roots are intended for local overrides. Resolution and ordinary reads never move or create data.
@@ -383,9 +413,15 @@ All package-specific errors inherit from `LedgerCoreError`.
 
 ```python
 from ledgercore.errors import (
-    LedgerCoreError, LedgerConfigError, StorageError, AtomicWriteError,
-    FrontMatterError, JsonStoreError, YamlStoreError,
-    PathValidationError, IdFormatError,
+    LedgerCoreError,
+    LedgerConfigError,
+    StorageError,
+    AtomicWriteError,
+    FrontMatterError,
+    JsonStoreError,
+    YamlStoreError,
+    PathValidationError,
+    IdFormatError,
 )
 
 try:
@@ -404,8 +440,10 @@ application boundary:
 ```python
 from ledgercore.errors import LedgerCoreError
 
+
 def to_usage_error(exc: LedgerCoreError) -> UsageError:
     return UsageError(str(exc))
+
 
 try:
     load_application_state()

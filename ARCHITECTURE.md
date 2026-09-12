@@ -1,6 +1,6 @@
 ---
 title: "Architecture Documentation"
-version: 6
+version: 7
 generator: "archledger 0.3.2"
 arc42_template_version: "9.0-EN"
 ---
@@ -32,9 +32,10 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 2. Produce deterministic, human-readable JSON, JSONL, YAML, and YAML-front-matter files.
 3. Validate untrusted relative path strings before resolving them under a trusted base.
 4. Provide canonical local and cross-ledger numeric identifiers.
-5. Discover canonical Ledger-family manifests and resolve the deterministic schema-3 storage model without writing during ordinary resolution.
-6. Own typed TOML configuration, storage binding markers, and explicit migration planning and execution behind a framework-neutral API.
-7. Keep domain schemas, locking, synchronization, and user interfaces in downstream applications.
+5. Provide additive UUIDv7 identifiers and references for independently generated resources.
+6. Discover canonical Ledger-family manifests and resolve the deterministic schema-3 storage model without writing during ordinary resolution.
+7. Own typed TOML configuration, storage binding markers, and explicit migration planning and execution behind a framework-neutral API.
+8. Keep domain schemas, locking, synchronization, and user interfaces in downstream applications.
 
 ## Quality priorities
 
@@ -47,7 +48,8 @@ The library is embedded by a downstream Python application. It has no CLI, serve
 ## Non-goals
 
 - Domain-specific schemas or workflow rules
-- Global ID allocation across concurrent processes
+- Shared numeric ID allocation across concurrent processes
+- Global causal ordering or monotonicity for UUIDv7 values
 - Transactions spanning multiple files
 - Authentication, authorization, encryption, or secret management
 - Remote storage, synchronization, indexing, querying, or database abstraction
@@ -143,7 +145,7 @@ Local filesystem
 - Canonical Ledger-family project discovery, schema parsing, and typed layout resolution
 - Deterministic project, external, user-data, cache, and tool-config paths
 - TOML ownership, binding marker validation, migration planning, execution, and journals
-- Numeric ID and cross-ledger reference parsing/formatting
+- Numeric and UUIDv7 ID and cross-ledger reference parsing/formatting
 - SHA-256 fingerprints and UTC timestamp formatting
 - Package-specific exception taxonomy
 
@@ -156,7 +158,7 @@ Local filesystem
 - UI, observability, configuration parsing, Git synchronization, and network access
 - Choice of ledger codes, kinds, and relation semantics
 
-The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state and performs no writes during layout discovery or resolution.
+The downstream application owns all persisted data. `ledgercore` keeps no catalog or process-global state and performs no writes during layout discovery or resolution. UUIDv7 generation is a stateless facade over uuid6, apart from its process-local thread-safety lock.
 
 ## Business Context
 
@@ -178,6 +180,7 @@ The architecture remains a stateless utility library organized by technical conc
 6. **Immutable value objects.** Parsed IDs, references, fingerprints, config locations, layouts, and JSONL results use frozen dataclasses.
 7. **Layered errors.** Modules wrap low-level parse and I/O failures in package-specific errors and preserve causes.
 8. **No retained state.** Calls depend only on arguments, filesystem state, environment, platform conventions, and clock.
+9. **Additive identity families.** Numeric identifiers remain compatible while UUIDv7 identifiers provide distributed uniqueness and useful creation-time ordering without a shared counter.
 
 ## Decomposition rationale
 
@@ -201,10 +204,10 @@ The architecture remains a stateless utility library organized by technical conc
 ledgercore
 ├── storage foundation: errors, atomic, io
 ├── structured documents: jsonio, jsonl, yamlio, frontmatter, tomlio
-├── identity and references: ids, refs
+├── identity and references: ids, refs, uuids
 ├── path handling: paths, path_text, config
 ├── project layout: manifest, overrides, storage_paths, storage_binding, layout, migration
-├── derived values: hashing, time
+├── derived values: hashing, time, uuids
 └── public facade: __init__
 ```
 
@@ -218,8 +221,8 @@ ledgercore
 | `yamlio`          | Mapping-only YAML and deterministic output                              | PyYAML, atomic, errors                                              |
 | `frontmatter`     | YAML front matter and source iteration                                  | PyYAML, atomic, errors                                              |
 | `tomlio`          | Round-trip TOML I/O with comment preservation                           | tomlkit, atomic, errors                                             |
-| `ids`             | Configurable prefixed numeric IDs and slugs                             | Standard library                                                    |
-| `refs`            | Canonical/local/file/legacy resource references                         | errors                                                              |
+| `ids`             | Configurable prefixed numeric and UUIDv7 IDs and slugs                 | Standard library, uuids                                             |
+| `refs`            | Numeric and UUIDv7 canonical/local/file resource references             | errors, uuids                                                       |
 | `paths`           | Strict path validation and confinement                                  | pathlib, errors                                                     |
 | `path_text`       | Human-authored path matching normalization                              | Unicode/regex stdlib                                                |
 | `config`          | Upward config discovery and `ConfigLocator`                             | pathlib, errors                                                     |
@@ -239,7 +242,7 @@ ledgercore
 - Storage formats may delegate writes to `atomic`.
 - Foundational modules (`errors`, `atomic`, `io`) do not depend on higher-level formats.
 - Layout and migration modules depend on lower-level building blocks but not on serialization formats.
-- No module owns mutable singleton state.
+- No module owns mutable singleton state. UUIDv7 generation uses a process-local lock only to serialize the backend.
 
 Names exported from modules and the curated package `__all__` are intended API. Underscore-prefixed helpers are internal. Front matter compatibility aliases are public legacy surfaces.
 
